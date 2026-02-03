@@ -1,0 +1,7 @@
+build/
+pcaps/
+logs/
+
+# Python artifacts
+__pycache__/
+*.pyc
