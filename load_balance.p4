@@ -3,8 +3,6 @@
 #include <core.p4>
 #include <v1model.p4>
 
-const bit<32> VIP_ADDRESS = 0x0A000001; // Example: 10.0.0.1
-
 /*************************************************************************
 *********************** H E A D E R S  ***********************************
 *************************************************************************/
@@ -68,7 +66,7 @@ parser MyParser(packet_in packet,
     }
     state parse_ethernet {
         packet.extract(hdr.ethernet);
-        transition select(hdr.ethernet.ethernetType) {
+        transition select(hdr.ethernet.etherType) {
             0x800: parse_ipv4;
             default: accept;
         }
@@ -121,8 +119,8 @@ control MyIngress(inout headers hdr,
     }
 
     action set_nhop(bit<48> nhop_dmac, bit<32> nhop_ipv4, bit<9> port) {
-        hdr.ethernet.destinationAddress = nhop_dmac;
-        hdr.ipv4.destinationAddress = nhop_ipv4;
+        hdr.ethernet.dstAddr = nhop_dmac;
+        hdr.ipv4.dstAddr = nhop_ipv4;
         standard_metadata.egress_spec = port;
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
     }
@@ -140,64 +138,40 @@ control MyIngress(inout headers hdr,
 
     table connection_table {
         key = {
-            hdr.ipv4.sourceAddress: exact;
-            hdr.ipv4.destinationAddress: exact;
+            hdr.ipv4.srcAddr: exact;
+            hdr.ipv4.dstAddr: exact;
             hdr.ipv4.protocol: exact;
-            hdr.tcp.sourcePort: exact;
-            hdr.tcp.destinationPort: exact;
+            hdr.tcp.srcPort: exact;
+            hdr.tcp.dstPort: exact;
         }
         actions = {
             set_nhop;
-        }
-        size = 1024;
-    }
-
-    table ipv4_lpm {
-        key = {
-            hdr.ipv4.destinationAddress: lpm;
-        }
-        actions = {
-            set_nhop;
-            drop;
         }
         size = 1024;
     }
 
     apply {
-        if (hdr.ipv4.destinationAddress == VIP_ADDRESS) {  // Client to Servers
-            if (hdr.ipv4.isValid() && hdr.ipv4.ttl > 0) {
-                // 1. Calculate flow hash for Bloom Filter and Connection Table
-                bit<32> flow_hash;
-                hash(flow_hash, HashAlgorithm.crc16, (bit<32>)0,
-                    { hdr.ipv4.sourceAddress, hdr.ipv4.destinationAddress, hdr.ipv4.protocol, 
-                    hdr.tcp.sourcePort, hdr.tcp.destinationPort }, (bit<32>)16384);
+        if (hdr.ipv4.isValid() && hdr.ipv4.ttl > 0) {
+            // 1. Calculate flow hash for Bloom Filter and Connection Table
+            bit<32> flow_hash;
+            hash(flow_hash, HashAlgorithm.crc16, (bit<32>)0,
+                { hdr.ipv4.srcAddr, hdr.ipv4.dstAddr, hdr.ipv4.protocol, 
+                  hdr.tcp.srcPort, hdr.tcp.dstPort }, (bit<32>)16384);
 
-                bit<1> is_known;
-                connecion_filter.read(is_known, (bit<32>)flow_hash);
+            bit<1> is_known;
+            connecion_filter.read(is_known, (bit<32>)flow_hash);
 
-                if (is_known == 1 && connection_table.apply().hit) {
-                    // Connection exists: forwarded via connection_table hit
-                } else {
-                    // Assume N=4 servers as per your topology
-                    select_new_server(4);
-                    ecmp_nhop.apply();
-                    
-                    connecion_filter.write((bit<32>)flow_hash, 1);
-                    // Note: Real hardware would use P4Runtime to "learn" this 5-tuple 
-                    // into the connection_table to ensure consistency.
-                }
+            if (is_known == 1 && connection_table.apply().hit) {
+                // Connection exists: forwarded via connection_table hit
+            } else {
+                // Assume N=4 servers as per your topology
+                select_new_server(4);
+                ecmp_nhop.apply();
+                
+                connecion_filter.write((bit<32>)flow_hash, 1);
+                // Note: Real hardware would use P4Runtime to "learn" this 5-tuple 
+                // into the connection_table to ensure consistency.
             }
-        }else if (hdr.ipv4.isValid()) {// Server to client
-            // If the packet is from a server, rewrite Source IP to VIP
-            hdr.ipv4.sourceAddress = VIP_ADDRESS;
-            
-            // Use a standard routing table or direct port mapping to find the Client
-            // For your topology, h1 is usually on port 1
-            standard_metadata.egress_spec = 1; 
-            
-            // Update MACs for the return trip
-            // The Controller should populate a 'routing' table for this
-            ipv4_lpm.apply(); 
         }
     }
 }
@@ -211,7 +185,7 @@ control MyEgress(inout headers hdr,
                  inout standard_metadata_t standard_metadata) {
 
     action rewrite_mac(bit<48> smac) {
-        hdr.ethernet.sourceAddress = smac;
+        hdr.ethernet.srcAddr = smac;
     }
     action drop() {
         mark_to_drop(standard_metadata);
@@ -242,14 +216,14 @@ control MyComputeChecksum(inout headers hdr, inout metadata meta) {
             { hdr.ipv4.version,
               hdr.ipv4.ihl,
               hdr.ipv4.diffserv,
-              hdr.ipv4.totalLength,
+              hdr.ipv4.totalLen,
               hdr.ipv4.identification,
               hdr.ipv4.flags,
               hdr.ipv4.fragOffset,
               hdr.ipv4.ttl,
               hdr.ipv4.protocol,
-              hdr.ipv4.sourceAddress,
-              hdr.ipv4.destinationAddress },
+              hdr.ipv4.srcAddr,
+              hdr.ipv4.dstAddr },
             hdr.ipv4.hdrChecksum,
             HashAlgorithm.csum16);
     }
