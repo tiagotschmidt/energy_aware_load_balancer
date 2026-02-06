@@ -33,6 +33,7 @@ from mininet.net import Mininet
 from mininet.topo import Topo
 from p4_mininet import P4Host, P4Switch
 from p4runtime_switch import P4RuntimeSwitch
+import signal
 
 
 def configureP4Switch(**switch_args):
@@ -156,7 +157,7 @@ class ExerciseRunner:
 
 
     def __init__(self, topo_file, log_dir, pcap_dir,
-                       switch_json, bmv2_exe='simple_switch', quiet=False):
+                       switch_json, bmv2_exe='simple_switch_grpc', quiet=False):
         """ Initializes some attributes and reads the topology json. Does not
             actually run the exercise. Use run_exercise() for that.
 
@@ -192,19 +193,14 @@ class ExerciseRunner:
 
     def run_exercise(self):
         """ Sets up the mininet instance, programs the switches,
-            and starts the mininet CLI. This is the main method to run after
-            initializing the object.
+            and starts the mininet CLI.
         """
-        # Initialize mininet with the topology specified by the config
         self.create_network()
         self.net.start()
         sleep(1)
 
-        # some programming that must happen after the net has started
         self.program_hosts()
         self.program_switches()
-
-        # wait for that to finish. Not sure how to do this better
         sleep(1)
 
         self.do_net_cli()
