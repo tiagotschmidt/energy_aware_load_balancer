@@ -48,7 +48,11 @@ def calculate_energy_efficiency(util, power):
     return score
 
 def main():
-    hostname = socket.gethostname()
+    if len(sys.argv) > 1:
+        hostname = sys.argv[1]
+    else:
+        hostname = socket.gethostname() # Fallback
+
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     
     # Initial readings for Delta calculations

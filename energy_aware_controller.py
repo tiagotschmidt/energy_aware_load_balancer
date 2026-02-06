@@ -8,60 +8,81 @@ P4_UTILS_PATH = '/home/p4/tutorials/utils'
 if P4_UTILS_PATH not in sys.path:
     sys.path.append(P4_UTILS_PATH)
 
-# 2. NOW DO THE IMPORTS
 try:
     import p4runtime_lib.bmv2 as bmv2
     import p4runtime_lib.helper as helper
-    from p4.v1 import p4runtime_pb2 as p4runtime_pb2  # This will work now!
+    from p4.v1 import p4runtime_pb2 as p4runtime_pb2
     print("--- SUCCESS: P4 Libraries and Protobufs Loaded ---")
 except ImportError as e:
     print(f"--- ERROR: Could not find P4 modules: {e} ---")
     sys.exit(1)
-    
-    
+
+class RobustSwitchConnection(bmv2.Bmv2SwitchConnection):
+    """
+    Inherits from Bmv2SwitchConnection but overrides the broken
+    MasterArbitrationUpdate method to accept custom election IDs.
+    """
+    def MasterArbitrationUpdate(self, dry_run=False, election_id_low=1, **kwargs):
+        request = p4runtime_pb2.StreamMessageRequest()
+        request.arbitration.device_id = self.device_id
+        request.arbitration.election_id.high = 0
+        
+        request.arbitration.election_id.low = election_id_low 
+
+        if dry_run:
+            print("P4Runtime MasterArbitrationUpdate: ", request)
+        else:
+            self.requests_stream.put(request)
+            for item in self.stream_msg_resp:
+                return item 
+
 class MyLBController:
     def __init__(self, p4info_path, bmv2_json_path):
-        # Initialize P4Runtime helper and connection
         self.p4info_helper = helper.P4InfoHelper(p4info_path)
-        self.server_stats = {}  # {hostname: (score, util)}
-        # Add a retry loop to wait for the switch to wake up
+        self.server_stats = {} 
+        
         connected = False
         for i in range(5):
             try:
-                self.sw = bmv2.Bmv2SwitchConnection(
+                self.sw = RobustSwitchConnection(
                     name='s1',
                     address='127.0.0.1:50051',
                     device_id=0)
-                self.sw.MasterArbitrationUpdate()
+                
+                self.sw.MasterArbitrationUpdate(election_id_low=100)
+                
                 connected = True
-                print("Connected to switch!")
+                print("Connected to switch as Master (ID=100)!")
                 break
             except Exception as e:
-                print(f"Switch not ready, retrying in 2 seconds... ({i+1}/5)")
+                print(f"Switch not ready, retrying in 2 seconds... ({i+1}/5) Error: {e}")
                 time.sleep(2)
             
         if not connected:
             print("Failed to connect to switch after 5 attempts.")
             sys.exit(1)
         
-        print("Installing P4 pipeline config...")
-        self.sw.SetForwardingPipelineConfig(p4info=self.p4info_helper.p4info,
-                                            bmv2_json_file_path=bmv2_json_path)
-        print("Pipeline config installed successfully!")
+        print("Controller is ready and listening.")
 
     def run_listener(self):
         """UDP Listener for periodic messaging from server agents."""
+        print("Starting UDP Listener on Port 50001...")
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind(("0.0.0.0", 50001))
+        
         while True:
-            data, _ = sock.recvfrom(1024)
-            # Parse format: "hostname,score,util"
-            host, score, util = data.decode().split(",")
-            self.server_stats[host] = (float(score), float(util))
-            self.recompute_and_update()
+            data, addr = sock.recvfrom(1024)
+            try:
+                msg = data.decode().strip()
+                host, score, util = msg.split(",")
+                self.server_stats[host] = (float(score), float(util))
+                print(f"Received update from {host}: Score={score}, Util={util}%")
+                self.recompute_and_update()
+            except Exception as e:
+                print(f"Error parsing message '{data}': {e}")
 
     def recompute_and_update(self, N=2):
-        """Implements the Tiered Selection Policy (Algorithm 1)."""
+        """Implements the Tiered Selection Policy."""
         available_set = []
         busy_set = []
 
@@ -71,46 +92,31 @@ class MyLBController:
             else:
                 busy_set.append((host, score))
 
-        # Sort by efficiency score descending
         available_set.sort(key=lambda x: x[1], reverse=True)
         busy_set.sort(key=lambda x: x[1], reverse=True)
 
-        # Merge sets: Available first, then Busy
         ordered_servers = (available_set + busy_set)[:N]
-        self.update_switch_tables(ordered_servers)
+        if ordered_servers:
+            self.update_switch_tables(ordered_servers)
 
     def update_switch_tables(self, priority_list):
-        """Installs the updated priority ordering into the ecmp_nhop table."""
-
-        # Static mapping based on your topology.json
         server_info = {
-            "p4dev": {"ip": "10.0.2.2", "mac": "08:00:00:00:02:02", "port": 2},
-            "h2":    {"ip": "10.0.2.2", "mac": "08:00:00:00:02:02", "port": 2},
-            "h3":    {"ip": "10.0.3.3", "mac": "08:00:00:00:03:03", "port": 3},
-            "h4":    {"ip": "10.0.4.4", "mac": "08:00:00:00:04:04", "port": 4},
-            "h5":    {"ip": "10.0.5.5", "mac": "08:00:00:00:05:05", "port": 5},
+            "h2": {"ip": "10.0.2.2", "mac": "08:00:00:00:02:02", "port": 2},
+            "h3": {"ip": "10.0.3.3", "mac": "08:00:00:00:03:03", "port": 3},
         }
 
-        print(f"\n--- Updating Switch Rules ---")
-        print(f"Current Priority: {priority_list}")
+        print(f"--- Logic Update: New Priority {priority_list} ---")
 
-        # priority_list is like [('h2', 85.5), ('h3', 40.2)]
         for index, server_tuple in enumerate(priority_list):
             hostname = server_tuple[0]
             score = server_tuple[1]
             
-            if hostname not in server_info:
-                print(f"SKIPPING: Unknown host '{hostname}'")
-                continue
-
+            if hostname not in server_info: continue
             info = server_info[hostname]
 
-            # Build the Table Entry for the 'ecmp_nhop' table
             table_entry = self.p4info_helper.buildTableEntry(
                 table_name="MyIngress.ecmp_nhop",
-                match_fields={
-                    "meta.ecmp_select": index  # Match the index
-                },
+                match_fields={"meta.ecmp_select": index},
                 action_name="MyIngress.set_nhop",
                 action_params={
                     "nhop_dmac": info["mac"],
@@ -120,17 +126,14 @@ class MyLBController:
             )
 
             try:
-                # 1. Try to INSERT the rule (works if index is empty)
                 self.sw.WriteTableEntry(table_entry)
-                print(f"SUCCESS: Inserted {hostname} at Index {index} (Score: {score:.2f})")
+                print(f"   > Index {index}: Inserted {hostname}")
             except Exception:
                 try:
-                    # 2. If index is occupied, MODIFY the existing rule
-                    # Note: tutorial library uses update_type as a second positional argument
                     self.sw.WriteTableEntry(table_entry, p4runtime_pb2.Update.MODIFY)
-                    print(f"SUCCESS: Updated Index {index} to {hostname} (Score: {score:.2f})")
+                    print(f"   > Index {index}: Updated to {hostname}")
                 except Exception as e:
-                    print(f"CRITICAL ERROR at Index {index}: {e}")
+                    print(f"   > Index {index}: Error: {e}")
 
 if __name__ == "__main__":
     ctrl = MyLBController("build/load_balance.p4info.txtpb", "build/load_balance.json")
