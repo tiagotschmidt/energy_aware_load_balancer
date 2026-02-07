@@ -29,9 +29,13 @@ HOST_CONFIG = {
     "h3": (3, "10.0.3.3", "08:00:00:00:03:03"),
 }
 
+def get_log_path(name):
+    return f"{os.getcwd()}/logs/{name}.log"
+
 class EnergyTopo(Topo):
     def __init__(self, **opts):
         Topo.__init__(self, **opts)
+        s1_log = get_log_path("s1")
         
         # P4RuntimeSwitch handles the gRPC port automatically
         s1 = self.addSwitch('s1', 
@@ -41,7 +45,8 @@ class EnergyTopo(Topo):
                             thrift_port=9090,
                             grpc_port=50051,
                             pcap_dump='pcaps',
-                            log_console=True)
+                            log_console=True,
+                            log_file=s1_log)
 
         for host_name, config in HOST_CONFIG.items():
             core_id, ip_addr, mac_addr = config
