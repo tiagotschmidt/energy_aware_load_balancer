@@ -33,45 +33,43 @@ class P4RuntimeSwitch(P4Switch):
     next_thrift_port = 9090
 
     def __init__(
-        self,
-        name,
-        sw_path=None,
-        json_path=None,
-        grpc_port=None,
-        thrift_port=None,
-        pcap_dump=False,
-        log_console=False,
-        verbose=False,
-        device_id=None,
-        enable_debugger=False,
-        log_file=None,
-        **kwargs
-    ):
+    self,
+    name,
+    sw_path=None,
+    json_path=None,
+    grpc_port=None,
+    thrift_port=None,
+    pcap_dump=False,
+    log_console=False,
+    verbose=False,
+    device_id=None,
+    enable_debugger=False,
+    log_file=None,
+    **kwargs
+):
+        # --- Base class ---
         Switch.__init__(self, name, **kwargs)
-        assert sw_path
-        self.sw_path = sw_path
-        # make sure that the provided sw_path is valid
+
+        # --- Switch binary ---
+        if not sw_path:
+            raise AssertionError("sw_path must be provided")
         pathCheck(sw_path)
+        self.sw_path = sw_path
 
+        # --- JSON pipeline ---
         if json_path is not None:
-            # make sure that the provided JSON file exists
             if not os.path.isfile(json_path):
-                error("Invalid JSON file: {}\n".format(json_path))
+                error(f"Invalid JSON file: {json_path}\n")
                 exit(1)
-            self.json_path = json_path
-        else:
-            self.json_path = None
+        self.json_path = json_path
 
-        if grpc_port is not None:
-            self.grpc_port = grpc_port
-        else:
-            self.grpc_port = P4RuntimeSwitch.next_grpc_port
+        # --- Ports ---
+        self.grpc_port = grpc_port if grpc_port is not None else P4RuntimeSwitch.next_grpc_port
+        if grpc_port is None:
             P4RuntimeSwitch.next_grpc_port += 1
 
-        if thrift_port is not None:
-            self.thrift_port = thrift_port
-        else:
-            self.thrift_port = P4RuntimeSwitch.next_thrift_port
+        self.thrift_port = thrift_port if thrift_port is not None else P4RuntimeSwitch.next_thrift_port
+        if thrift_port is None:
             P4RuntimeSwitch.next_thrift_port += 1
 
         if check_listening_on_port(self.grpc_port):
@@ -81,27 +79,27 @@ class P4RuntimeSwitch(P4Switch):
             )
             exit(1)
 
+        # --- Logging / verbosity ---
         self.verbose = verbose
-        logfile = "/tmp/p4s.{}.log".format(self.name)
-        self.output = open(logfile, "w")
         self.pcap_dump = pcap_dump
         self.enable_debugger = enable_debugger
         self.log_console = log_console
-        if log_file is not None:
-            self.log_file = log_file
-        else:
-            self.log_file = "/tmp/p4s.{}.log".format(self.name)
+
+        self.log_file = log_file if log_file is not None else f"{os.getcwd()}/logs/{name}.log"
+        self.output = open(f"/tmp/p4s.{self.name}.log", "w")
+
+        # --- Device ID & nanomsg ---
         if device_id is not None:
             self.device_id = device_id
             P4Switch.device_id = max(P4Switch.device_id, device_id)
         else:
             self.device_id = P4Switch.device_id
             P4Switch.device_id += 1
-        self.nanomsg = "ipc:///tmp/bm-{}-log.ipc".format(self.device_id)
 
-        self.cpu_port = None
-        if "cpu_port" in kwargs:
-            self.cpu_port = kwargs["cpu_port"]
+        self.nanomsg = f"ipc:///tmp/bm-{self.device_id}-log.ipc"
+
+        # --- Optional CPU port ---
+        self.cpu_port = kwargs.get("cpu_port")
 
     def check_switch_started(self, pid):
         for _ in range(SWITCH_START_TIMEOUT * 2):
