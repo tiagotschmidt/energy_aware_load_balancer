@@ -13,22 +13,42 @@ LOG_LEVEL = logging.INFO
 
 logging.basicConfig(level=LOG_LEVEL, format='%(asctime)s [%(levelname)s] %(message)s')
 
-def get_cpu_utilization():
+def get_cpu_utilization(cpu_core:str):
     """
-    Reads /proc/stat directly. This is much faster than spawning a 'top' process
-    and much more accurate for high-frequency reporting.
+    Reads /proc/stat and aggregates usage stats for all cores 
+    assigned to this process (via core pinning).
+    Returns a single tuple: (total_idle, total_time)
     """
     try:
-        with open('/proc/stat', 'r') as f:
-            line = f.readline()
-        parts = list(map(int, line.split()[1:]))
+        pinned_core = cpu_core
+        
+        accumulated_idle = 0
+        accumulated_total = 0
 
-        idle_time = parts[3]
-        total_time = sum(parts)
-        return idle_time, total_time
+        with open('/proc/stat', 'r') as f:
+            for line in f:
+                parts = line.split()
+                if parts[0].startswith('cpu') and len(parts[0]) > 3:
+                    core_id = int(parts[0][3:])
+                    logging.info(f"Current Line:[{line}];[{core_id}];[{pinned_core}]")
+                    
+                    if core_id == int(pinned_core):
+                        logging.info(f"Match Line:[{line}]")
+                        # metrics: user, nice, system, idle, iowait, irq, softirq, steal
+                        metrics = list(map(int, parts[1:]))
+                        
+                        # Idle time = idle (index 3) + iowait (index 4)
+                        core_idle = metrics[3] + metrics[4]
+                        core_total = sum(metrics)
+                        
+                        accumulated_idle += core_idle
+                        accumulated_total += core_total
+        
+        return accumulated_idle, accumulated_total
     except Exception as e:
-        logging.error(f"Could not read CPU stats: {e}")
+        logging.error(f"Could not read aggregate CPU stats: {e}")
         return 0, 0
+    
 
 def get_energy_joules():
     """Reads Intel RAPL energy counter."""
@@ -48,15 +68,17 @@ def calculate_energy_efficiency(util, power):
     return score
 
 def main():
-    if len(sys.argv) > 1:
+    if len(sys.argv) > 2:
         hostname = sys.argv[1]
+        cpu_core = sys.argv[2]
     else:
         hostname = socket.gethostname() # Fallback
+        cpu_core = ""
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     
     # Initial readings for Delta calculations
-    prev_idle, prev_total = get_cpu_utilization()
+    prev_idle, prev_total = get_cpu_utilization(cpu_core)
     prev_energy = get_energy_joules()
     prev_time = time.time()
 
@@ -67,7 +89,7 @@ def main():
             time.sleep(INTERVAL)
             
             # 1. Calculate CPU Util via Delta
-            curr_idle, curr_total = get_cpu_utilization()
+            curr_idle, curr_total = get_cpu_utilization(cpu_core)
             diff_idle = curr_idle - prev_idle
             diff_total = curr_total - prev_total
             # Handle potential wrap-around or fresh boot edge cases
