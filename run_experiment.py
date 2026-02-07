@@ -5,9 +5,8 @@ import sys
 
 # Import P4 Tutorial Utils
 sys.path.append('/home/p4/tutorials/utils')
-import p4runtime_lib.bmv2
-import p4runtime_lib.helper
 from p4runtime_switch import P4RuntimeSwitch
+from p4_mininet import P4Host
 
 from mininet.net import Mininet
 from mininet.topo import Topo
@@ -15,13 +14,13 @@ from mininet.node import CPULimitedHost
 from mininet.link import TCLink
 from mininet.cli import CLI
 from mininet.log import setLogLevel, info
-from p4_mininet import P4Host
 
 # --- Configuration ---
 P4_SOURCE = "p4src/load_balance.p4"
 BUILD_DIR = "build"
 JSON_FILE = f"{BUILD_DIR}/load_balance.json"
-P4INFO_FILE = f"{BUILD_DIR}/load_balance.p4info.txtpb"
+P4INFO_FILE = f"{BUILD_DIR}/load_balance.p4.p4info.txtpb"
+GRPC_PORT = 50051 
 
 HOST_CONFIG = {
     "h1": (1, "10.0.1.1", "08:00:00:00:01:01"),
@@ -46,7 +45,7 @@ class EnergyTopo(Topo):
                             grpc_port=50051,
                             pcap_dump='pcaps',
                             log_console=True,
-                            log_file=s1_log)
+                            log_file=get_log_path("s1"))
 
         for host_name, config in HOST_CONFIG.items():
             core_id, ip_addr, mac_addr = config
@@ -67,68 +66,46 @@ def compile_p4():
 
 def configure_network(net):
     info("--- Configuring Gateway & ARP ---\n")
-    for host_name, config in HOST_CONFIG.items():
-        h = net.get(host_name)
-        h.cmd("ip route add 10.0.0.1 dev eth0")
-        h.cmd("arp -s 10.0.0.1 08:00:00:00:01:01")
-        h.cmd("ethtool --offload eth0 rx off tx off")
+    h1 = net.get("h1")
+    h1.cmd("ip route add 10.0.0.1 dev eth0")
+    h1.cmd("arp -s 10.0.0.1 00:00:00:00:01:01") 
 
-def program_switch_manually(net):
-    """
-    Directly programs the switch using P4Runtime.
-    This ensures the pipeline is set BEFORE the controller starts.
-    """
-    info("--- Programming Switch (Direct P4Runtime) ---\n")
-    sw = net.get('s1')
-    
-    try:
-        p4info_helper = p4runtime_lib.helper.P4InfoHelper(P4INFO_FILE)
-        s1_conn = p4runtime_lib.bmv2.Bmv2SwitchConnection(
-            name='s1',
-            address=f'127.0.0.1:{sw.grpc_port}',
-            device_id=0
-        )
-        s1_conn.MasterArbitrationUpdate()
-        
-        # Set Pipeline (The "Push")
-        s1_conn.SetForwardingPipelineConfig(
-            p4info=p4info_helper.p4info,
-            bmv2_json_file_path=JSON_FILE
-        )
-        info("--- Switch Programmed Successfully ---\n")
-        
-    except Exception as e:
-        info(f"!!! Error Programming Switch: {e}\n")
-        sys.exit(1)
+    h2 = net.get("h2")
+    h2.cmd("ip route add 10.0.1.0/24 dev eth0") 
+    h2.cmd("arp -s 10.0.1.1 00:00:00:00:02:02") 
+
+    h3 = net.get("h3")
+    h3.cmd("ip route add 10.0.1.0/24 dev eth0")
+    h3.cmd("arp -s 10.0.1.1 00:00:00:00:03:03")
+
+    for h in net.hosts:
+        h.cmd("ethtool --offload eth0 rx off tx off")
 
 def run_experiment():
     compile_p4()
-    os.makedirs("logs", exist_ok=True)
-    os.makedirs("pcaps", exist_ok=True)
+    if not os.path.exists("logs"): os.makedirs("logs")
+    if not os.path.exists("pcaps"): os.makedirs("pcaps")
 
     topo = EnergyTopo()
     net = Mininet(topo=topo, host=P4Host, link=TCLink, controller=None)
     net.start()
     configure_network(net)
 
-    # Program the switch
-    program_switch_manually(net)
+    # REMOVED: program_switch_manually()
+    # The controller will handle P4 pipeline configuration now.
 
-    # --- CONTROLLER REMOVED ---
-    # We do NOT start energy_aware_controller.py here.
-    # You will run it manually in another terminal.
-    
-    # Start Agents (These are still useful to keep automatic)
     info("--- Starting Agents ---\n")
     agent_procs = []
-    for host_name in HOST_CONFIG:
+    for host_name, config in HOST_CONFIG.items():
         if host_name == "h1": continue
+        core_id = config[0]
+        h = net.get(host_name)
         log_file = open(f"logs/{host_name}_agent.log", "w")
-        p = subprocess.Popen([sys.executable, "server_agent.py", host_name], 
-                             stdout=log_file, stderr=log_file)
-        agent_procs.append(p)
+        # p = h.popen([sys.executable, "server_agent.py", host_name, str(core_id)], 
+        #             stdout=log_file, stderr=log_file)
+        # agent_procs.append(p)
 
-    info("\n*** Ready. Start your controller manually now! ***\n")
+    info(f"\n*** Infrastructure Ready. Start 'energy_aware_controller.py' in another terminal! ***\n")
     
     CLI(net)
 
