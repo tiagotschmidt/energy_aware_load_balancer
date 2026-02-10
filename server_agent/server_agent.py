@@ -14,7 +14,7 @@ INTERVAL = 1.0           # Seconds between updates
 BENCHMARK_SCORE = 100    # Capability constant (e.g., max ops/sec)
     
 #RAPL_FILE = "/sys/class/powercap/intel-rapl:0/energy_uj"
-RAPL_FILE = "./rapl/rapl_value.txt"
+RAPL_FILE = "../rapl/rapl_value.txt"
 
 # Log Setup (Console)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')

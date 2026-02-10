@@ -1,7 +1,5 @@
-import os
 import socket
 import sys
-import time
 
 
 # This path contains the 'p4' folder and 'p4runtime_lib'
