@@ -193,16 +193,28 @@ class MyLBController:
                 print(f"Error parsing message: {e}")
 
     def recompute_and_update(self, N=1):
+        ordered = self.performance_only_priority(N)
+        # ordered = self.energy_aware_priority(N)
+        if ordered: self.update_switch_tables(ordered)
+
+    def energy_aware_priority(self, N):
         available = []
         busy = []
         for host, (score, util) in self.server_stats.items():
             if util < 90.0: available.append((host, score))
             else: busy.append((host, score))
-
         available.sort(key=lambda x: x[1], reverse=True)
         busy.sort(key=lambda x: x[1], reverse=True)
         ordered = (available + busy)[:N]
         if ordered: self.update_switch_tables(ordered)
+    
+    def performance_only_priority(self, N):
+        allServers = []
+        for host, (score, util) in self.server_stats.items():
+            allServers.append((host, util))
+        allServers.sort(key=lambda x: x[1], reverse=False)
+        ordered = (allServers)[:N]
+        return ordered
 
 if __name__ == "__main__":
     ctrl = MyLBController("build/load_balance.p4.p4info.txtpb", "build/load_balance.json")
