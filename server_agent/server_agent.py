@@ -12,7 +12,7 @@ SWITCH_IP = "127.0.0.1"  # IP of the Controller listening for UDP
 PORT = 50001
 INTERVAL = 1.0           # Seconds between updates
 BENCHMARK_SCORE = 100    # Capability constant (e.g., max ops/sec)
-    
+
 #RAPL_FILE = "/sys/class/powercap/intel-rapl:0/energy_uj"
 RAPL_FILE = "../rapl/rapl_value.txt"
 
@@ -81,16 +81,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("host_name", help="Name of this host (e.g., h2)")
     parser.add_argument("cpu_core", help="Pinned CPU Core ID (e.g., 0)")
-    parser.add_argument("--efficiency", type=float, default=1.0, help="Artificial efficiency factor (1.0=Normal, 1.2=Inefficient)")
-    parser.add_argument("--jitter", type=float, default=0.05, help="Random noise factor (e.g., 0.05)")
+    parser.add_argument("--efficiency", type=float, default=None, help="Optional: Override random efficiency")
     
     args = parser.parse_args()
+
+    startup_efficiency = random.uniform(0.7, 1.3)
 
     # --- CSV LOGGING SETUP ---
     log_dir = "logs"
     if not os.path.exists(log_dir): os.makedirs(log_dir)
     
-    # Filename: logs/h2_energy.csv
     csv_file = f"{log_dir}/{args.host_name}_energy.csv"
     
     # Initialize CSV with Headers
@@ -98,11 +98,11 @@ def main():
         writer = csv.writer(f)
         writer.writerow(["timestamp", "host", "cpu_util", "power_watts", "efficiency_score"])
     
-    logging.info(f"Agent {args.host_name} Started. Logging to {csv_file}")
+    logging.info(f"Agent {args.host_name} Started.")
+    logging.info(f"Hardware Profile Generated: Efficiency Factor = {startup_efficiency:.2f} (70%-130% Range)")
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     
-    # Initial State
     _, prev_idle, prev_total = get_cpu_utilization(args.cpu_core, 0, 0)
     prev_energy = get_energy_joules()
     prev_time = time.time()
@@ -127,25 +127,23 @@ def main():
                 raw_power = 10.0 + (util * 0.5)
                 mode = "SIM"
 
-            # 3. Apply Artificial Deviation
-            modified_power = raw_power * args.efficiency
-            if args.jitter > 0:
-                noise = random.uniform(1.0 - args.jitter, 1.0 + args.jitter)
-                modified_power = modified_power * noise
+            # 3. Apply The Startup Factor (Hardware Profile)
+            # This factor stays constant for the life of the agent
+            profiled_power = raw_power * startup_efficiency
 
             # 4. Calculate Score
-            score = calculate_energy_efficiency(util, modified_power)
+            score = calculate_energy_efficiency(util, profiled_power)
 
-            # --- 5. LOG TO CSV (CRITICAL STEP) ---
+            # --- 5. LOG TO CSV ---
             with open(csv_file, 'a', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow([curr_time, args.host_name, f"{util:.2f}", f"{modified_power:.2f}", f"{score:.2f}"])
+                writer.writerow([curr_time, args.host_name, f"{util:.2f}", f"{profiled_power:.2f}", f"{score:.2f}"])
 
             # 6. Send Telemetry
             message = f"{args.host_name},{score:.4f},{util:.2f}"
             try:
                 sock.sendto(message.encode(), (SWITCH_IP, PORT))
-                logging.info(f"[{mode}] Sent: {message} | Pwr: {modified_power:.2f}W")
+                logging.info(f"[{mode}] Sent: {message} | Pwr: {profiled_power:.2f}W (Factor: {startup_efficiency:.2f})")
             except Exception as e:
                 logging.error(f"UDP Error: {e}")
 
