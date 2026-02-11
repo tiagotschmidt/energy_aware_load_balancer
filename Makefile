@@ -7,10 +7,8 @@ LOG_DIR = logs
 
 # Compiler Configuration
 P4C = p4c-bm2-ss
-# Since $@ will be "build/load_balance.json", basename will be "build/load_balance"
+# Generates the P4Info file needed for the Controller
 P4C_ARGS += --p4runtime-files $(basename $@).p4info.txtpb
-
-RUN_SCRIPT = ./p4-utils/run_exercise.py
 
 ifndef TOPO
 TOPO = topology.json
@@ -35,10 +33,10 @@ endif
 all: run
 
 run: build
-	sudo PATH=$(PATH) ${P4_EXTRA_SUDO_OPTS} python3 $(RUN_SCRIPT) -t $(TOPO) $(run_args)
+	sudo /home/p4/src/p4dev-python-venv/bin/python3 run_experiment.py
 
 stop:
-	sudo PATH=$(PATH) `which mn` -c
+	sudo `which mn` -c
 
 build: dirs $(compiled_json)
 
@@ -51,4 +49,4 @@ $(BUILD_DIR)/%.json: p4src/%.p4
 
 clean: stop
 	rm -f *.pcap
-	rm -rf $(BUILD_DIR) $(PCAP_DIR) $(LOG_DIR)
+	rm -rf $(BUILD_DIR) $(PCAP_DIR) 
