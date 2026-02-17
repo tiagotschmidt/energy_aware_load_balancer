@@ -241,15 +241,15 @@ control MyIngress(inout headers hdr,
                  bit<1> is_known_flow;
                  flow_bloom_filter.read(is_known_flow, hash_index);
 
-                 if (is_known_flow == 1) {
-                     // Sticky Session
-                     flow_server_map.read(meta.ecmp_select, hash_index);
-                 } else {
-                     // New Session
+                //  if (is_known_flow == 1) {
+                //      // Sticky Session
+                //      flow_server_map.read(meta.ecmp_select, hash_index);
+                //  } else {
+                //     //  New Session
                      select_new_server(2); 
                      flow_bloom_filter.write(hash_index, 1);
                      flow_server_map.write(hash_index, meta.ecmp_select);
-                 }
+                //  }
                  ecmp_nhop.apply();
             }
 
