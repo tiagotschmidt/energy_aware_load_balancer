@@ -23,9 +23,9 @@ P4INFO_FILE = f"{BUILD_DIR}/load_balance.p4.p4info.txtpb"
 GRPC_PORT = 50051 
 
 HOST_CONFIG = {
-    "h1": (1, "10.0.1.1", "08:00:00:00:01:01"),
-    "h2": (2, "10.0.2.2", "08:00:00:00:02:02"),
-    "h3": (3, "10.0.3.3", "08:00:00:00:03:03"),
+    "h1": (0,1, "10.0.1.1", "08:00:00:00:01:01"),
+    "h2": (4,2, "10.0.2.2", "08:00:00:00:02:02"),
+    "h3": (2,3, "10.0.3.3", "08:00:00:00:03:03"),
 }
 
 def get_log_path(name):
@@ -48,13 +48,13 @@ class EnergyTopo(Topo):
                             log_file=get_log_path("s1"))
 
         for host_name, config in HOST_CONFIG.items():
-            core_id, ip_addr, mac_addr = config
+            core_id, core_port,ip_addr, mac_addr = config
             self.addHost(host_name, 
                          cls=CPULimitedHost, 
                          cores=str(core_id),
                          ip=ip_addr, 
                          mac=mac_addr)
-            self.addLink(host_name, s1, port2=core_id)
+            self.addLink(host_name, s1, port2=core_port)
 
 def compile_p4():
     info("--- Compiling P4 Code ---\n")
