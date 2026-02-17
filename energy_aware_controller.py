@@ -28,6 +28,7 @@ class MyLBController:
         self.p4info_helper = helper.P4InfoHelper(p4info_path)
         self.bmv2_json_path = bmv2_json_path
         self.server_stats = {} 
+        self.current_allocations = {}
 
         self.s1_conn = p4runtime_lib.bmv2.Bmv2SwitchConnection(
             name='s1',
@@ -36,7 +37,6 @@ class MyLBController:
         )
         self.s1_conn.MasterArbitrationUpdate()
         
-        # Set Pipeline (The "Push")
         self.s1_conn.SetForwardingPipelineConfig(
             p4info=self.p4info_helper.p4info,
             bmv2_json_file_path=JSON_FILE
@@ -122,41 +122,38 @@ class MyLBController:
             "h2": {"ip": "10.0.2.2", "mac": "08:00:00:00:02:02", "port": 2},
             "h3": {"ip": "10.0.3.3", "mac": "08:00:00:00:03:03", "port": 3},
         }
-
-        print(f"--- Logic Update: New Priority {priority_list} ---")
+        
+        print(f"--- Logic Update: New Priority {[x[0] for x in priority_list]} ---")
 
         for index, server_tuple in enumerate(priority_list):
             hostname = server_tuple[0]
             if hostname not in server_info: continue
             info = server_info[hostname]
 
-            table_entry = self.p4info_helper.buildTableEntry(
+            # 1. Build the Target Entry
+            new_entry = self.p4info_helper.buildTableEntry(
                 table_name="MyIngress.ecmp_nhop",
                 match_fields={"meta.ecmp_select": index},
                 action_name="MyIngress.forward_to_server",
                 action_params={
-                    "server_mac": info["mac"],
-                    "server_ip": info["ip"],
+                    "server_mac": info["mac"],      
+                    "server_ip": info["ip"],    
                     "port": info["port"],
                 },
             )
-
-            # --- ROBUST WRITE LOGIC ---
+            
             try:
-                # 1. Try to INSERT (Optimistic)
-                self.s1_conn.WriteTableEntry(table_entry)
+                self.s1_conn.WriteTableEntry(new_entry)
                 print(f"   > Index {index}: Inserted {hostname}")
             except Exception as e_insert:
-                # 2. If INSERT fails (for ANY reason), try MODIFY
-                # We don't check string content because BMv2 returns erratic codes.
                 try:
-                    self.s1_conn.WriteTableEntry(table_entry, p4runtime_pb2.Update.MODIFY)
+                    self.s1_conn.WriteTableEntry(new_entry, p4runtime_pb2.Update.MODIFY)
                     print(f"   > Index {index}: Updated to {hostname}")
                 except Exception as e_modify:
-                    # 3. If BOTH fail, then we have a real problem
                     print(f"!!! CRITICAL ERROR writing Index {index} !!!")
                     print(f"    INSERT Error: {e_insert}")
                     print(f"    MODIFY Error: {e_modify}")
+
 
     def verify_table_state(self):
         print("\n--- VERIFYING SWITCH STATE ---")
