@@ -190,15 +190,15 @@ class MyLBController:
                 print(f"Error parsing message: {e}")
 
     def recompute_and_update(self, N=1):
-        ordered = self.performance_only_priority(N)
-        # ordered = self.energy_aware_priority(N)
+        # ordered = self.performance_only_priority(N)
+        ordered = self.energy_aware_priority(N)
         if ordered: self.update_switch_tables(ordered)
 
     def energy_aware_priority(self, N):
         available = []
         busy = []
         for host, (score, util) in self.server_stats.items():
-            if util < 90.0: available.append((host, score))
+            if util < 70.0: available.append((host, score))
             else: busy.append((host, score))
         available.sort(key=lambda x: x[1], reverse=True)
         busy.sort(key=lambda x: x[1], reverse=True)

@@ -10,7 +10,7 @@ import csv
 # --- Configuration ---
 SWITCH_IP = "127.0.0.1"  # IP of the Controller listening for UDP
 PORT = 50001
-INTERVAL = 1.0           # Seconds between updates
+INTERVAL = 0.5         # Seconds between updates
 BENCHMARK_SCORE = 100    # Capability constant (e.g., max ops/sec)
 
 #RAPL_FILE = "/sys/class/powercap/intel-rapl:0/energy_uj"
@@ -73,8 +73,9 @@ def get_energy_joules():
 
 def calculate_energy_efficiency(util, power):
     """Algorithm: Efficiency = Performance / Power."""
-    safe_power = max(power, 0.001) 
-    score = (max(util, 1.0) * BENCHMARK_SCORE) / safe_power
+    if(util==0):
+        util = 1
+    score = (util * BENCHMARK_SCORE) / power
     return score
 
 def main():
@@ -85,7 +86,8 @@ def main():
     
     args = parser.parse_args()
 
-    startup_efficiency = random.uniform(0.7, 1.3)
+    # startup_efficiency = random.uniform(0.7, 1.3)
+    startup_efficiency = args.efficiency
 
     # --- CSV LOGGING SETUP ---
     log_dir = "logs"
