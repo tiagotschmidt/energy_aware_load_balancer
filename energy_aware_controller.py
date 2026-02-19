@@ -29,6 +29,7 @@ class MyLBController:
         self.bmv2_json_path = bmv2_json_path
         self.server_stats = {} 
         self.current_allocations = {}
+        self.installed_keys = {}
 
         self.s1_conn = p4runtime_lib.bmv2.Bmv2SwitchConnection(
             name='s1',
@@ -56,6 +57,7 @@ class MyLBController:
         self.verify_table_state()
 
         print("Controller is ready and listening.")
+        self.run_listener()
 
     def set_forwarding_pipeline(self):
         print("--- Setting Forwarding Pipeline Config ---")
@@ -125,12 +127,14 @@ class MyLBController:
         
         print(f"--- Logic Update: New Priority {[x[0] for x in priority_list]} ---")
 
+        desired_keys = set()
+
         for index, server_tuple in enumerate(priority_list):
             hostname = server_tuple[0]
             if hostname not in server_info: continue
             info = server_info[hostname]
+            desired_keys.add(index)
 
-            # 1. Build the Target Entry
             new_entry = self.p4info_helper.buildTableEntry(
                 table_name="MyIngress.ecmp_nhop",
                 match_fields={"meta.ecmp_select": index},
@@ -141,19 +145,33 @@ class MyLBController:
                     "port": info["port"],
                 },
             )
+
+            current = self.installed_keys.get(index)
+            print("Current is:" + str(current))
             
             try:
-                self.s1_conn.WriteTableEntry(new_entry)
-                print(f"   > Index {index}: Inserted {hostname}")
-            except Exception as e_insert:
-                try:
-                    self.s1_conn.WriteTableEntry(new_entry, p4runtime_pb2.Update.MODIFY)
-                    print(f"   > Index {index}: Updated to {hostname}")
-                except Exception as e_modify:
-                    print(f"!!! CRITICAL ERROR writing Index {index} !!!")
-                    print(f"    INSERT Error: {e_insert}")
-                    print(f"    MODIFY Error: {e_modify}")
+                if current == hostname:
+                    print("Equal!")
+                    continue
+                elif current is not None:
+                    print("Change")
+                    request = p4runtime_pb2.WriteRequest()
+                    request.device_id = self.s1_conn.device_id
+                    request.election_id.low = 1
 
+                    update = request.updates.add()
+                    update.type = p4runtime_pb2.Update.MODIFY
+                    update.entity.table_entry.CopyFrom(new_entry)
+                    self.s1_conn.client_stub.Write(request)
+                else:                
+                    print("Write")
+                    self.s1_conn.WriteTableEntry(new_entry)
+                    print(f"   > Index {index}: Inserted {hostname}")
+
+                self.installed_keys[index]=hostname
+            except Exception as e_insert:
+                print(f"!!! CRITICAL ERROR writing Index {index} !!!")
+                print(f"    INSERT Error: {e_insert}")
 
     def verify_table_state(self):
         print("\n--- VERIFYING SWITCH STATE ---")
@@ -200,10 +218,10 @@ class MyLBController:
         for host, (score, util) in self.server_stats.items():
             if util < 70.0: available.append((host, score))
             else: busy.append((host, score))
-        available.sort(key=lambda x: x[1], reverse=True)
-        busy.sort(key=lambda x: x[1], reverse=True)
+        available.sort(key=lambda x: x[1], reverse=False)
+        busy.sort(key=lambda x: x[1], reverse=False)
         ordered = (available + busy)[:N]
-        if ordered: self.update_switch_tables(ordered)
+        return ordered
     
     def performance_only_priority(self, N):
         allServers = []
@@ -215,4 +233,3 @@ class MyLBController:
 
 if __name__ == "__main__":
     ctrl = MyLBController("build/load_balance.p4.p4info.txtpb", "build/load_balance.json")
-    ctrl.run_listener()
