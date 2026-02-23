@@ -71,7 +71,7 @@ header arp_t {
 }
 
 struct metadata {
-    bit<14> ecmp_select;
+    bit<16> ecmp_select;
 }
 
 struct headers {
@@ -162,8 +162,8 @@ control MyIngress(inout headers hdr,
                   inout standard_metadata_t standard_metadata) {
 
     // --- CONNECTION CONSISTENCY REGISTERS ---
-    register<bit<1>>(16384) flow_bloom_filter; 
-    register<bit<14>>(16384) flow_server_map;
+    // register<bit<1>>(16384) flow_bloom_filter; 
+    // register<bit<14>>(16384) flow_server_map;
     register<bit<32>>(1) rr_counter;
 
     action drop() {
@@ -172,17 +172,17 @@ control MyIngress(inout headers hdr,
 
     // --- FORWARD PATH ACTION (Client -> Server) ---
     // Combines DNAT + Routing + MAC Rewrite in one step
-    action forward_to_server(bit<48> server_mac, bit<32> server_ip, bit<9> port) {
+    action forward_to_server(bit<48> server_mac, bit<32> server_ip, bit<16> port) {
         hdr.ethernet.dstAddr = server_mac;
         hdr.ipv4.dstAddr = server_ip;
-        standard_metadata.egress_spec = port;
+        standard_metadata.egress_spec = (bit<9>)port;
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
     }
 
     action select_new_server(bit<32> max_servers) {
         bit<32> current_idx;
         rr_counter.read(current_idx, 0);
-        meta.ecmp_select = (bit<14>)current_idx;
+        meta.ecmp_select = (bit<16>)current_idx;
         bit<32> next_idx = (current_idx + 1) % max_servers;
         rr_counter.write(0, next_idx);
     }
@@ -198,7 +198,7 @@ control MyIngress(inout headers hdr,
     action nat_reply_to_client(bit<48> client_mac, bit<9> port) {
         hdr.ipv4.srcAddr = VIP_ADDRESS; // Hide Server IP (SNAT)
         hdr.ethernet.dstAddr = client_mac;
-        standard_metadata.egress_spec = port;
+        standard_metadata.egress_spec = (bit<9>)port;
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
     }
 
@@ -238,18 +238,18 @@ control MyIngress(inout headers hdr,
                     hdr.udp.dstPort
                  }, (bit<32>)16384);
 
-                 bit<1> is_known_flow;
-                 flow_bloom_filter.read(is_known_flow, hash_index);
+                //  bit<1> is_known_flow;
+                //  flow_bloom_filter.read(is_known_flow, hash_index);
 
                 //  if (is_known_flow == 1) {
                 //      // Sticky Session
                 //      flow_server_map.read(meta.ecmp_select, hash_index);
                 //  } else {
                 //     //  New Session
-                     select_new_server(2); 
-                     flow_bloom_filter.write(hash_index, 1);
-                     flow_server_map.write(hash_index, meta.ecmp_select);
-                //  }
+                 select_new_server(2); 
+                //      flow_bloom_filter.write(hash_index, 1);
+                //      flow_server_map.write(hash_index, meta.ecmp_select);
+                // //  }
                  ecmp_nhop.apply();
             }
 
