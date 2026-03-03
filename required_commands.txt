@@ -1,0 +1,52 @@
+# ENERGY AWARE LOAD BALANCER - REQUIRED COMMANDS
+# ================================================
+
+## 1. ENVIRONMENT SETUP
+export SDE=/home/p4/open-p4studio
+export SDE_INSTALL=$SDE/install
+
+## 2. SWITCH DAEMON (Terminal Controller API)
+# Start switchd
+./run_switchd.sh -p load_balance
+
+# Stop switchd
+sudo killall -9 bf_switchd tofino-model
+
+## 3. TOFINO MODEL
+eval $(./create-setup-script.sh )
+./run_tofino_model.sh -p load_balance -c install/load_balance.tofino/load_balance.conf
+
+## 4. CONTROLLER
+python3 /home/p4/energy_aware_load_balancer/energy_aware_controller_tofino.py
+
+## 5. AGENT
+python3 server_agent.py h2 --driver intel
+
+## 6. CLIENT (Virtual Tofino Model)
+sudo ip netns add client
+sudo ip link set veth1 netns client
+sudo ip netns exec client ip link set dev veth1 address 08:00:00:00:01:01
+sudo ip netns exec client ip addr add 10.0.1.1/24 dev veth1
+sudo ip netns exec client ip link set dev veth1 up
+sudo ip netns exec client ip route add 10.0.0.1 dev veth1
+sudo ip netns exec client arp -s 10.0.0.1 00:00:00:00:01:01
+
+## 7. SERVER H2 (Virtual Tofino Model)
+sudo ip netns add h2
+sudo ip link set veth3 netns h2
+sudo ip netns exec h2 ip link set dev veth3 address 08:00:00:00:02:02
+sudo ip netns exec h2 ip addr add 10.0.2.2/24 dev veth3
+sudo ip netns exec h2 ip link set dev veth3 up
+sudo ip netns exec h2 ip route add 10.0.1.0/24 dev veth3
+sudo ip netns exec h2 arp -s 10.0.1.1 00:00:00:00:02:02
+sudo ip netns exec h2 python3 -m http.server 80 &
+
+## 8. SERVER H3 (Virtual Tofino Model)
+sudo ip netns add h3
+sudo ip link set veth5 netns h3
+sudo ip netns exec h3 ip link set dev veth5 address 08:00:00:00:03:03
+sudo ip netns exec h3 ip addr add 10.0.3.3/24 dev veth5
+sudo ip netns exec h3 ip link set dev veth5 up
+sudo ip netns exec h3 ip route add 10.0.1.0/24 dev veth5
+sudo ip netns exec h3 arp -s 10.0.1.1 00:00:00:00:03:03
+sudo ip netns exec h3 python3 -m http.server 80 &
