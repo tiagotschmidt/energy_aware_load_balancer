@@ -70,13 +70,19 @@ parser SwitchIngressParser(
         pkt.extract(hdr.ipv4);
         ipv4_checksum.add(hdr.ipv4);
         transition select(hdr.ipv4.protocol) {
-            IP_PROTOCOLS_TCP: parse_tcp;
+            // IP_PROTOCOLS_TCP: parse_tcp;
+            IP_PROTOCOLS_UDP: parse_udp;
             default: accept;
         }
     }
 
-    state parse_tcp {
-        pkt.extract(hdr.tcp);
+    // state parse_tcp {
+    //     pkt.extract(hdr.tcp);
+    //     transition accept;
+    // }
+    
+    state parse_udp{
+        pkt.extract(hdr.udp);
         transition accept;
     }
 }
@@ -109,7 +115,7 @@ control SwitchIngressDeparser(
         }
         pkt.emit(hdr.ethernet);
         pkt.emit(hdr.ipv4);
-        pkt.emit(hdr.tcp);
+        pkt.emit(hdr.udp);
     }
 }
 
@@ -148,6 +154,7 @@ control SwitchIngress(
         hdr.ipv4.dstAddr = server_ip;
         // standard_metadata.egress_spec = (bit<9>)port;
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
+        ig_tm_md.ucast_egress_port = (bit<9>)port; 
     }
 
     action select_new_server(bit<32> max_servers) {
@@ -170,6 +177,7 @@ control SwitchIngress(
         hdr.ethernet.dstAddr = client_mac;
         // standard_metadata.egress_spec = (bit<9>)port;
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
+        ig_tm_md.ucast_egress_port = port;
     }
 
     table server_src_nat {
@@ -220,7 +228,6 @@ parser SwitchEgressParser(
 
     state start {
         tofino_parser.apply(pkt, eg_intr_md);
-        pkt.extract(hdr.bridge);
         transition parse_ethernet;
     }
 
@@ -236,13 +243,13 @@ parser SwitchEgressParser(
         pkt.extract(hdr.ipv4);
         ipv4_checksum.add(hdr.ipv4);
         transition select(hdr.ipv4.protocol) {
-            IP_PROTOCOLS_TCP: parse_tcp;
+            IP_PROTOCOLS_UDP: parse_udp;
             default: accept;
         }
     }
 
-    state parse_tcp {
-        pkt.extract(hdr.tcp);
+    state parse_udp {
+        pkt.extract(hdr.udp);
         transition accept;
     }
 }
@@ -280,7 +287,7 @@ control SwitchEgressDeparser(
     apply {
         pkt.emit(hdr.ethernet);
         pkt.emit(hdr.ipv4);
-        pkt.emit(hdr.tcp);
+        pkt.emit(hdr.udp);
     }
 }
 
