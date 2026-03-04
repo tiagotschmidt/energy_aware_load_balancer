@@ -80,7 +80,7 @@ class MyLBController:
         print("Installing Fixed Return Path Rules (Server -> Client)...")
         client_ip = "10.0.3.3"
         client_port = 40  # Based on your UP port 33/0
-        client_mac = "94:6d:ae:5c:87:12"
+        client_mac = "94:6d:ae:5c:86:b2"
         
         # Real Backend Server IPs from p4server1 and p4server3
         servers = ["10.0.1.2", "10.0.1.1"]
