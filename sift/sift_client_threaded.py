@@ -20,35 +20,44 @@ def receiver_thread(sock):
     """Listens for replies and calculates latency using the Echoed ID."""
     while not STOP_EVENT.is_set():
         try:
-            data, _ = sock.recvfrom(1024)
+            data, addr = sock.recvfrom(4096) # Increased buffer for safety
             recv_ts = time.time()
             
-            resp = data.decode(errors='ignore')
+            # Use 'replace' to handle potential binary garbage from hardware padding
+            resp = data.decode(errors='replace')
             
             if "Reply from" in resp and "ID:" in resp:
+                # DEBUG: The existing logic uses split(" ") which fails if 
+                # there's multiple spaces or hardware padding at the end.
                 parts = resp.split(" ")
                 
-                server_id = parts[2]
-                
-                id_part = next((s for s in parts if s.startswith("ID:")), None)
-                
-                latency = 0
-                if id_part:
-                    try:
-                        req_id = int(id_part.split(":")[1])
+                try:
+                    server_id = parts[2]
+                    id_part = next((s for s in parts if s.startswith("ID:")), None)
+                    
+                    if id_part:
+                        # Strip any trailing characters (like ':') or null bytes
+                        raw_id = id_part.split(":")[1].strip('\x00').strip()
+                        req_id = int(raw_id)
                         
                         with LOCK:
                             if req_id in INFLIGHT_TIMESTAMPS:
                                 send_ts = INFLIGHT_TIMESTAMPS.pop(req_id)
                                 latency = (recv_ts - send_ts) * 1000
-                    except:
-                        pass
+                                STATS_QUEUE.put((recv_ts, "OK", server_id, latency))
+                    else:
+                        print(f"[DEBUG] Found 'ID:' in string but parts split failed. Raw: {resp!r}")
                 
-                STATS_QUEUE.put((recv_ts, "OK", server_id, latency))
+                except (IndexError, ValueError) as e:
+                    # THIS IS THE CRITICAL LOG: It shows us exactly what broke the int() conversion
+                    print(f"[PARSING ERROR] Failed to extract ID. Error: {e}")
+                    print(f"  -> Raw Buffer: {resp!r}")
+                    print(f"  -> Split Parts: {parts}")
             
         except socket.timeout:
             continue
         except Exception as e:
+            print(f"[RECEIVER CRITICAL] {e}")
             continue
 
 def run_open_loop_test(target_ip, port, min_rate, max_rate, step_size, step_duration):
