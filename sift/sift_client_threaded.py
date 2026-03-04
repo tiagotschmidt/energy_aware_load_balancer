@@ -18,13 +18,28 @@ LOCK = threading.Lock()
 
 def receiver_thread(sock):
     """Listens for replies and calculates latency using the Echoed ID."""
+    print("--- Receiver Thread: Polling Started ---")
     while not STOP_EVENT.is_set():
         try:
-            data, addr = sock.recvfrom(4096) # Increased buffer for safety
+            data, addr = sock.recvfrom(4096)
             recv_ts = time.time()
             
-            # Use 'replace' to handle potential binary garbage from hardware padding
+            # RAW LOGGING - This MUST trigger if packets reach the app
+            print(f"DEBUG: Received {len(data)} bytes from {addr}")
+            
+            # Use 'replace' to see where the garbage is
             resp = data.decode(errors='replace')
+            
+            # Check for substring existence independently
+            has_reply = "Reply from" in resp
+            has_id = "ID:" in resp
+            
+            if not (has_reply and has_id):
+                print(f"DEBUG: Filter Failed. HasReply={has_reply}, HasID={has_id}")
+                print(f"DEBUG: Content Snippet: {resp[:100]!r}")
+                continue
+
+            # ... rest of your logic
             
             if "Reply from" in resp and "ID:" in resp:
                 # DEBUG: The existing logic uses split(" ") which fails if 
