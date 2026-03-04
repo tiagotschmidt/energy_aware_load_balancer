@@ -71,10 +71,12 @@ class MyLBController:
 
     def install_return_path_rule(self):
         print("Installing Fixed Return Path Rules (Server IP -> Client IP)...")
-        client_ip = "10.0.1.1"
-        client_port = 0
-        client_mac = "08:00:00:00:01:01"
-        servers = ["10.0.2.2", "10.0.3.3"]
+        # client_ip = "10.0.1.1"
+        client_ip = "10.0.3.3"
+        client_port = 180
+        client_mac = "94:6d:ae:5c:86:b2"
+        # client_mac = "08:00:00:00:01:01"
+        servers = ["10.0.1.1", "10.0.2.1"]
 
         for server_ip in servers:
             key = self.nat_table.make_key(
@@ -101,14 +103,17 @@ class MyLBController:
     def update_switch_tables(self, priority_list):
         server_info = {
             "h2": {
-                "ip": "10.0.2.2",
-                "mac": "08:00:00:00:02:02",
-                "port": 1,
+                # "ip": "10.0.2.2",
+                "ip": "10.0.1.1",
+                # "mac": "08:00:00:00:02:02",
+                "mac": "94:6d:ae:5c:87:72",
+                "port": 132,
             },
             "h3": {
-                "ip": "10.0.3.3",
-                "mac": "08:00:00:00:03:03",
-                "port": 2,
+                "ip": "10.0.2.1",
+                # "mac": "08:00:00:00:03:03",
+                "mac": "94:6d:ae:5d:fd:9c",
+                "port": 66
             },            
         }
 
