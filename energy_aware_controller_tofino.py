@@ -118,25 +118,43 @@ class MyLBController:
             },            
         }
 
+        print(f"--- Logic Update: New Priority {[x[0] for x in priority_list]} ---")
+
         for index, server_tuple in enumerate(priority_list):
             hostname = server_tuple[0]
+            if hostname not in server_info:
+                print(f"   > Warning: Unknown hostname '{hostname}' in priority list")
             info = server_info[hostname]
 
             key = self.ecmp_table.make_key([gc.KeyTuple("meta.ecmp_select", index)])
-            data = self.ecmp_table.make_data([
-                gc.DataTuple("server_mac", self.mac_to_bytes(info["mac"])),
-                gc.DataTuple("server_ip", self.ipv4_to_bytes(info["ip"])),
-                gc.DataTuple("port", info["port"]),
-            ], "SwitchIngress.forward_to_server")
+            data = self.ecmp_table.make_data(
+                [
+                    gc.DataTuple("server_mac", self.mac_to_bytes(info["mac"])),
+                    gc.DataTuple("server_ip", self.ipv4_to_bytes(info["ip"])),
+                    gc.DataTuple("port", info["port"]),
+                ],
+                "SwitchIngress.forward_to_server",
+            )
+
+            current = self.installed_keys.get(index)
+            print("Current is:" + str(current))
 
             try:
-                if self.installed_keys.get(index) is not None:
+                if current == hostname:
+                    print("Equal!")
+                    continue
+                elif current is not None:
+                    print("Change (Modify)")
                     self.ecmp_table.entry_mod(self.target, [key], [data])
                 else:
+                    print("Write (Add)")
                     self.ecmp_table.entry_add(self.target, [key], [data])
+                    print(f"   > Index {index}: Inserted {hostname}")
+
                 self.installed_keys[index] = hostname
-            except Exception as e:
-                print(f"!!! Error writing Index {index}: {e}")
+            except Exception as e_insert:
+                print(f"!!! CRITICAL ERROR writing Index {index} !!!")
+                print(f"    INSERT/MOD Error: {e_insert}")
 
     def verify_table_state(self):
         print("\n--- VERIFYING SWITCH STATE ---")
@@ -183,7 +201,7 @@ class MyLBController:
         available = []
         busy = []
         print(
-            f"--- AplhaLogic Update: New Priority {[x[0] for x in self.server_stats.items()]} ---"
+            f"--- Logic Update: New Priority {[x[0] for x in self.server_stats.items()]} ---"
         )
         for host, (score, util) in self.server_stats.items():
             if util < 70.0:
@@ -193,7 +211,7 @@ class MyLBController:
         available.sort(key=lambda x: x[1], reverse=False)
         busy.sort(key=lambda x: x[1], reverse=False)
         ordered = (available + busy)[:N]
-        print(f"--- AplhaLogic Update: New Priority {[x[0] for x in ordered]} ---")
+        print(f"--- Logic Update: New Priority {[x[0] for x in ordered]} ---")
         return ordered
 
     def performance_only_priority(self, N):
