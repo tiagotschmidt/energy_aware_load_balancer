@@ -53,7 +53,7 @@ class MyLBController:
         # Port 132: Server h2 (p4server1)
         # Port 180: Server h3 (p4server3)
         port_mac_map = {
-            64:  "00:00:00:00:01:01", 
+            40:  "00:00:00:00:01:01", 
             132: "00:00:00:00:02:02", 
             180: "00:00:00:00:03:03", 
         }
@@ -107,12 +107,12 @@ class MyLBController:
         server_info = {
             "h2": {
                 "ip": "10.0.1.1",
-                "mac": "94:6d:ae:5c:87:72",
+                "mac": "94:6d:ae:5c:87:12",
                 "port": 132, # 100G Port
             },
             "h3": {
                 "ip": "10.0.1.2",
-                "mac": "94:6d:ae:5c:86:b2",
+                "mac": "94:6d:ae:5d:fd:9c",
                 "port": 180  # 10G Port
             },            
         }
