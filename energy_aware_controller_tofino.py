@@ -78,13 +78,12 @@ class MyLBController:
 
     def install_return_path_rule(self):
         print("Installing Fixed Return Path Rules (Server -> Client)...")
-        # p4server2 is the client
-        client_ip = "10.0.1.2"
+        client_ip = "10.0.3.3"
         client_port = 64  # Based on your UP port 33/0
         client_mac = "94:6d:ae:5c:87:12"
         
         # Real Backend Server IPs from p4server1 and p4server3
-        servers = ["10.0.2.2", "10.0.3.3"]
+        servers = ["10.0.1.2", "10.0.1.1"]
 
         for server_ip in servers:
             key = self.nat_table.make_key([
@@ -107,12 +106,12 @@ class MyLBController:
         # PHYSICAL TOPOLOGY MAPPING
         server_info = {
             "h2": {
-                "ip": "10.0.2.2",
+                "ip": "10.0.1.1",
                 "mac": "94:6d:ae:5c:87:72",
                 "port": 132, # 100G Port
             },
             "h3": {
-                "ip": "10.0.3.3",
+                "ip": "10.0.1.2",
                 "mac": "94:6d:ae:5c:86:b2",
                 "port": 180  # 10G Port
             },            
