@@ -47,11 +47,15 @@ class MyLBController:
         return bytearray.fromhex(mac_str.replace(":", ""))
 
     def install_egress_rewrite_rules(self):
-        print("Installing Egress Rewrite Rules...")
+        print("Installing Egress Rewrite Rules (Source MAC Rewriting)...")
+        # These are the MACs the Switch uses as its "identity" for each segment
+        # Port 64: Client (p4server2)
+        # Port 132: Server h2 (p4server1)
+        # Port 180: Server h3 (p4server3)
         port_mac_map = {
-            1: "00:00:00:00:01:01",
-            2: "00:00:00:00:02:02",
-            3: "00:00:00:00:03:03",
+            40:  "00:00:00:00:01:01", 
+            132: "00:00:00:00:02:02", 
+            180: "00:00:00:00:03:03", 
         }
         for port, smac in port_mac_map.items():
             key = self.egress_table.make_key(
@@ -63,57 +67,53 @@ class MyLBController:
             )
 
             try:
+                # Use entry_add; if it fails, the verify step will catch it
                 self.egress_table.entry_add(self.target, [key], [data])
                 print(f"   > Egress Rule: Port {port} -> SMAC {smac}")
             except Exception as e:
-                if "ALREADY_EXISTS" not in str(e):
-                    print(f"   > Error installing egress rule: {e}")
+                if "ALREADY_EXISTS" in str(e):
+                    self.egress_table.entry_mod(self.target, [key], [data])
+                else:
+                    print(f"   > Error on Port {port}: {e}")
 
     def install_return_path_rule(self):
-        print("Installing Fixed Return Path Rules (Server IP -> Client IP)...")
-        # client_ip = "10.0.1.1"
+        print("Installing Fixed Return Path Rules (Server -> Client)...")
         client_ip = "10.0.3.3"
-        client_port = 180
+        client_port = 40  # Based on your UP port 33/0
         client_mac = "94:6d:ae:5c:86:b2"
-        # client_mac = "08:00:00:00:01:01"
-        servers = ["10.0.1.1", "10.0.2.1"]
+        
+        # Real Backend Server IPs from p4server1 and p4server3
+        servers = ["10.0.1.2", "10.0.1.1"]
 
         for server_ip in servers:
-            key = self.nat_table.make_key(
-                [
-                    gc.KeyTuple("hdr.ipv4.srcAddr", self.ipv4_to_bytes(server_ip)),
-                    gc.KeyTuple("hdr.ipv4.dstAddr", self.ipv4_to_bytes(client_ip)),
-                ]
-            )
-            data = self.nat_table.make_data(
-                [
-                    gc.DataTuple("client_mac", self.mac_to_bytes(client_mac)),
-                    gc.DataTuple("port", client_port),
-                ],
-                "SwitchIngress.nat_reply_to_client",
-            )
+            key = self.nat_table.make_key([
+                gc.KeyTuple("hdr.ipv4.srcAddr", self.ipv4_to_bytes(server_ip)),
+                gc.KeyTuple("hdr.ipv4.dstAddr", self.ipv4_to_bytes(client_ip)),
+            ])
+            data = self.nat_table.make_data([
+                gc.DataTuple("client_mac", self.mac_to_bytes(client_mac)),
+                gc.DataTuple("port", client_port),
+            ], "SwitchIngress.nat_reply_to_client")
 
             try:
                 self.nat_table.entry_add(self.target, [key], [data])
                 print(f"   > Return Rule: Src {server_ip} -> Dst {client_ip}")
             except Exception as e:
                 if "ALREADY_EXISTS" not in str(e):
-                    print(f"   > Error installing return rule: {e}")
+                    print(f"   > Error: {e}")
 
     def update_switch_tables(self, priority_list):
+        # PHYSICAL TOPOLOGY MAPPING
         server_info = {
             "h2": {
-                # "ip": "10.0.2.2",
                 "ip": "10.0.1.1",
-                # "mac": "08:00:00:00:02:02",
-                "mac": "94:6d:ae:5c:87:72",
-                "port": 132,
+                "mac": "94:6d:ae:5c:87:12",
+                "port": 132, # 100G Port
             },
             "h3": {
-                "ip": "10.0.2.1",
-                # "mac": "08:00:00:00:03:03",
+                "ip": "10.0.1.2",
                 "mac": "94:6d:ae:5d:fd:9c",
-                "port": 66
+                "port": 180  # 10G Port
             },            
         }
 
@@ -200,7 +200,7 @@ class MyLBController:
         available = []
         busy = []
         print(
-            f"--- AplhaLogic Update: New Priority {[x[0] for x in self.server_stats.items()]} ---"
+            f"--- Logic Update: New Priority {[x[0] for x in self.server_stats.items()]} ---"
         )
         for host, (score, util) in self.server_stats.items():
             if util < 70.0:
@@ -210,7 +210,7 @@ class MyLBController:
         available.sort(key=lambda x: x[1], reverse=False)
         busy.sort(key=lambda x: x[1], reverse=False)
         ordered = (available + busy)[:N]
-        print(f"--- AplhaLogic Update: New Priority {[x[0] for x in ordered]} ---")
+        print(f"--- Logic Update: New Priority {[x[0] for x in ordered]} ---")
         return ordered
 
     def performance_only_priority(self, N):
