@@ -207,8 +207,8 @@ class MyLBController:
                 available.append((host, score))
             else:
                 busy.append((host, score))
-        available.sort(key=lambda x: x[1], reverse=False)
-        busy.sort(key=lambda x: x[1], reverse=False)
+        available.sort(key=lambda x: x[1], reverse=True)
+        busy.sort(key=lambda x: x[1], reverse=True)
         ordered = (available + busy)[:N]
         print(f"--- Logic Update: New Priority {[x[0] for x in ordered]} ---")
         return ordered
