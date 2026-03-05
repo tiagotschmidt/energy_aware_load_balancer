@@ -7,7 +7,9 @@ import csv
 import glob
 
 # --- Configuration ---
-SWITCH_IP = "127.0.0.1"
+# SWITCH_IP = "127.0.0.1"
+SWITCH_IP = "143.54.51.26"
+
 PORT = 50001
 INTERVAL = 0.5
 LOG_DIR = "../sift/logs"
@@ -133,6 +135,8 @@ def main():
                 power = 10.0 + (util * 0.5)  # Fallback Simulation
                 mode = "SIM"
 
+            EPSILON = 1.0
+
             # score = Throughput / Power
             throughput = (
                 float(
@@ -142,7 +146,7 @@ def main():
                 if os.path.exists(f"{LOG_DIR}/{args.host_name}_throughput.txt")
                 else 0.0
             )
-            score = throughput / power if power > 0 else 0.0
+            score = (throughput + EPSILON) / power if power > 0 else 0.0
 
             # Log and Send Telemetry
             with open(csv_file, "a", newline="") as f:
