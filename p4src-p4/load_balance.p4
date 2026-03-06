@@ -132,12 +132,13 @@ control SwitchIngress(
     void apply(inout bit<32> state_val, out bit<32> return_val) {
         return_val = state_val;
 
-        // 2. Increment and wrap around (simulating the % operator)
-        if (state_val == POOL_SIZE - 1) {
-            state_val = 0;
-        } else {
-            state_val = state_val + 1;
-        }
+        // // 2. Increment and wrap around (simulating the % operator)
+        // if (state_val == POOL_SIZE - 1) {
+        //     state_val = 0;
+        // } else {
+        //     state_val = state_val + 1;
+        // }
+        state_val = 0;
     }
     };
     
