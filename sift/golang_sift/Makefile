@@ -3,7 +3,7 @@ BUILD_DIR := ./build
 build: test build_server
 
 build_server:
-	go build -o $(BUILD_DIR)/sift_server server/sift_server.go
+	CGO_ENABLED=0 GOOS=linux go build -o $(BUILD_DIR)/sift_server server/sift_server.go
 
 test:
 	@echo "Running tests..."
