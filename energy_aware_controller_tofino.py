@@ -107,7 +107,7 @@ class MyLBController:
         server_info = {
             "h2": {
                 "ip": "10.0.1.1",
-                "mac": "94:6d:ae:5c:87:12",
+                "mac": "94:6d:ae:5c:87:72",
                 "port": 132, # 100G Port
             },
             "h3": {
