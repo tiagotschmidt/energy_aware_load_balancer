@@ -1,9 +1,12 @@
 BUILD_DIR := ./build
 
-build: test build_server
+build: test build_server build_client
 
 build_server:
 	CGO_ENABLED=0 GOOS=linux go build -o $(BUILD_DIR)/sift_server server/sift_server.go
+
+build_client:
+	CGO_ENABLED=0 GOOS=linux go build -o $(BUILD_DIR)/sift_client client/sift_client.go
 
 test:
 	@echo "Running tests..."
