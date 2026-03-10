@@ -1,4 +1,5 @@
 import socket
+import math
 import bfrt_grpc.client as gc
 
 
@@ -7,6 +8,13 @@ class MyLBController:
         self.server_stats = {}
         self.current_allocations = {}
         self.installed_keys = {}
+
+        # --- MAB (D-UCB) State Variables ---
+        self.mab_gamma = 0.95        # Decay factor (closer to 1 = longer memory)
+        self.mab_counts = {}         # Tracks decayed 'pulls' per server
+        self.mab_values = {}         # Tracks decayed reward per server
+        self.mab_total_pulls = 0     # Total observations
+        # -----------------------------------
 
         print("--- Initializing BFRT Connection ---")
         self.client_id = 0
@@ -117,12 +125,13 @@ class MyLBController:
             },            
         }
 
-        print(f"--- Logic Update: New Priority {[x[0] for x in priority_list]} ---")
+        print(f"--- Logic Update: Switch Priority {[x[0] for x in priority_list]} ---")
 
         for index, server_tuple in enumerate(priority_list):
             hostname = server_tuple[0]
             if hostname not in server_info:
                 print(f"   > Warning: Unknown hostname '{hostname}' in priority list")
+                continue
             info = server_info[hostname]
 
             key = self.ecmp_table.make_key([gc.KeyTuple("meta.ecmp_select", index)])
@@ -140,7 +149,7 @@ class MyLBController:
 
             try:
                 if current == hostname:
-                    print("Equal!")
+                    print("Equal! (No change needed)")
                     continue
                 elif current is not None:
                     print("Change (Modify)")
@@ -184,24 +193,73 @@ class MyLBController:
             try:
                 msg = data.decode().strip()
                 host, score, util = msg.split(",")
-                self.server_stats[host] = (float(score), float(util))
+                score, util = float(score), float(util)
+                
+                self.server_stats[host] = (score, util)
+                
+                # --- Update MAB State with new telemetry ---
+                self.update_mab_state(host, reward=score)
+                # -------------------------------------------
+
                 print(f"Received update from {host}: Score={score}, Util={util}%")
                 self.recompute_and_update()
             except Exception as e:
                 print(f"Error parsing message: {e}")
 
+    def update_mab_state(self, host, reward):
+        """Updates the D-UCB state by decaying old data and adding the new observation."""
+        if host not in self.mab_counts:
+            self.mab_counts[host] = 0
+            self.mab_values[host] = 0.0
+            
+        # 1. Decay historical knowledge of ALL known servers
+        for h in self.mab_counts:
+            self.mab_counts[h] *= self.mab_gamma
+            self.mab_values[h] *= self.mab_gamma
+            
+        # 2. Add the brand new observation for the reporting server
+        self.mab_counts[host] += 1
+        self.mab_values[host] += reward
+        self.mab_total_pulls += 1
+
+    def mab_priority(self, N):
+        """Calculates D-UCB score for all servers and returns them sorted."""
+        ucb_scores = []
+        
+        for host in self.server_stats.keys():
+            # Initialization Phase: If we have no data, prioritize exploring it
+            if self.mab_counts.get(host, 0) == 0:
+                ucb_scores.append((host, float('inf')))
+                continue
+                
+            # Exploitation: What is the current expected energy efficiency?
+            exploitation = self.mab_values[host]
+            
+            # Exploration: Mathematical uncertainty bonus
+            exploration = 0
+            if self.mab_total_pulls > 1:
+                exploration = math.sqrt((2 * math.log(self.mab_total_pulls)) / float(self.mab_counts[host]))
+            
+            ucb = exploitation + exploration
+            ucb_scores.append((host, ucb))
+            
+        # Sort servers by their UCB score in descending order (highest score first)
+        ucb_scores.sort(key=lambda x: x[1], reverse=True)
+        ordered = ucb_scores[:N]
+        
+        print(f"--- MAB Algorithm Evaluated Priority: {[x[0] for x in ordered]} ---")
+        return ordered
+
     def recompute_and_update(self, N=1):
         # ordered = self.performance_only_priority(N)
-        ordered = self.energy_aware_priority(N)
+        # ordered = self.energy_aware_priority(N)
+        ordered = self.mab_priority(N) # <-- MAB policy activated here
         if ordered:
             self.update_switch_tables(ordered)
 
     def energy_aware_priority(self, N):
         available = []
         busy = []
-        print(
-            f"--- Logic Update: New Priority {[x[0] for x in self.server_stats.items()]} ---"
-        )
         for host, (score, util) in self.server_stats.items():
             if util < 70.0:
                 available.append((host, score))
@@ -210,7 +268,6 @@ class MyLBController:
         available.sort(key=lambda x: x[1], reverse=True)
         busy.sort(key=lambda x: x[1], reverse=True)
         ordered = (available + busy)[:N]
-        print(f"--- Logic Update: New Priority {[x[0] for x in ordered]} ---")
         return ordered
 
     def performance_only_priority(self, N):
@@ -224,10 +281,8 @@ class MyLBController:
     def ipv4_to_bytes(self, ip_str):
         """Helper to convert IPv4 strings to bytearrays for BFRT."""
         import socket
-
         return bytearray(socket.inet_aton(ip_str))
 
 
 if __name__ == "__main__":
-    # Ensure your Tofino compile outputs a program named "load_balance"
     ctrl = MyLBController(program_name="load_balance", grpc_addr="127.0.0.1:50052")
