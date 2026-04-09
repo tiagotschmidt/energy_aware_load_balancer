@@ -61,15 +61,19 @@ func monitorThroughput(identity string, intervalMS int) {
 		time.Sleep(time.Millisecond * time.Duration(intervalMS))
 
 		requestCount := atomic.SwapUint64(&globalRequestCounter, 0)
-		var currentThroughput = float64(requestCount) / float64(intervalMS) / 1000.0 // todo create atomic requestCounter
+		// fmt.Printf("Current value on counter: %d\n", requestCount)
+		var currentThroughput = float64(requestCount) / (float64(intervalMS) / 1000.0)
 
 		tempFilename := fmt.Sprintf("%s.tmp", filename)
+		// fmt.Printf("tempFilename %s\n", tempFilename)
 
 		writeString := fmt.Sprintf("%.2f", currentThroughput)
 		err := os.WriteFile(tempFilename, []byte(writeString), 0644)
 		if err != nil {
 			fmt.Printf("Error: Could not write to temp file %s: %v\n", tempFilename, err)
 			continue
+			// } else {
+			// 	fmt.Printf("Wrote throughput %.2f to temp file %s\n", currentThroughput, tempFilename)
 		}
 
 		os.Rename(tempFilename, filename)
