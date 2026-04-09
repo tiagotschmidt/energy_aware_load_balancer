@@ -10,7 +10,7 @@ class MyLBController:
         self.installed_keys = {}
 
         # --- MAB (D-UCB) State Variables ---
-        self.mab_gamma = 0.95        # Decay factor (closer to 1 = longer memory)
+        # self.mab_gamma = 0.95        # Decay factor (closer to 1 = longer memory)
         self.mab_counts = {}         # Tracks decayed 'pulls' per server
         self.mab_values = {}         # Tracks decayed reward per server
         self.mab_total_pulls = 0     # Total observations
@@ -211,16 +211,8 @@ class MyLBController:
         if host not in self.mab_counts:
             self.mab_counts[host] = 0
             self.mab_values[host] = 0.0
-            
-        # 1. Decay historical knowledge of ALL known servers
-        for h in self.mab_counts:
-            self.mab_counts[h] *= self.mab_gamma
-            self.mab_values[h] *= self.mab_gamma
-            
-        # 2. Add the brand new observation for the reporting server
-        self.mab_counts[host] += 1
-        self.mab_values[host] += reward
-        self.mab_total_pulls += 1
+        
+        self.mab_values[host] = reward
 
     def mab_priority(self, N):
         """Calculates D-UCB score for all servers and returns them sorted."""
@@ -246,6 +238,12 @@ class MyLBController:
         # Sort servers by their UCB score in descending order (highest score first)
         ucb_scores.sort(key=lambda x: x[1], reverse=True)
         ordered = ucb_scores[:N]
+
+        first_host = ordered[0][0]
+
+        # 2. Add the brand new observation for the reporting server
+        self.mab_counts[first_host] += 1
+        self.mab_total_pulls += 1
         
         print(f"--- MAB Algorithm Evaluated Priority: {[x[0] for x in ordered]} ---")
         return ordered
