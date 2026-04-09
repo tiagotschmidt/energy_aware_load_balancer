@@ -135,7 +135,6 @@ def main():
                 power = 10.0 + (util * 0.5)  # Fallback Simulation
                 mode = "SIM"
 
-            EPSILON = 1.0
 
             # score = Throughput / Power
             throughput = (
@@ -146,7 +145,12 @@ def main():
                 if os.path.exists(f"{LOG_DIR}/{args.host_name}_throughput.txt")
                 else 0.0
             )
-            score = (throughput + EPSILON) / power if power > 0 else 0.0
+
+            score = 0.0
+            if(throughput == 0.0):
+                score = - power / 1000  # Penalize zero throughput
+            else:   
+                score = (throughput) / power if power > 0 else 0.0
 
             # Log and Send Telemetry
             with open(csv_file, "a", newline="") as f:
