@@ -10,8 +10,8 @@ class MyLBController:
         self.installed_keys = {}
 
         # --- MAB (D-UCB) State Variables ---
-        # self.mab_gamma = 0.95        # Decay factor (closer to 1 = longer memory)
         self.mab_counts = {}         # Tracks decayed 'pulls' per server
+        self.mab_explored = set()    # Tracks explored servers
         self.mab_values = {}         # Tracks decayed reward per server
         self.mab_total_pulls = 0     # Total observations
         # -----------------------------------
@@ -211,16 +211,18 @@ class MyLBController:
         if host not in self.mab_counts:
             self.mab_counts[host] = 0
             self.mab_values[host] = 0.0
-        
-        self.mab_values[host] = reward
+       
+        if(reward > 0):
+            self.mab_explored.add(host)
+            self.mab_values[host] = reward
 
     def mab_priority(self, N):
-        """Calculates D-UCB score for all servers and returns them sorted."""
+        """Calculates UCB score for all servers and returns them sorted."""
         ucb_scores = []
         
-        for host in self.server_stats.keys():
+        for host, (score, util) in self.server_stats.items():
             # Initialization Phase: If we have no data, prioritize exploring it
-            if self.mab_counts.get(host, 0) == 0:
+            if host not  in self.mab_explored:
                 ucb_scores.append((host, float('inf')))
                 continue
                 
@@ -233,7 +235,8 @@ class MyLBController:
                 exploration = math.sqrt((2 * math.log(self.mab_total_pulls)) / float(self.mab_counts[host]))
             
             ucb = exploitation + exploration
-            ucb_scores.append((host, ucb))
+            if(util < 95.0):    
+                ucb_scores.append((host, ucb))
             
         # Sort servers by their UCB score in descending order (highest score first)
         ucb_scores.sort(key=lambda x: x[1], reverse=True)
