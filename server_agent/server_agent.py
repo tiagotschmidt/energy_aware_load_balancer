@@ -148,7 +148,7 @@ def main():
 
             score = 0.0
             if(throughput == 0.0):
-                score = - power / 1000  # Penalize zero throughput
+                score = - power   # Penalize zero throughput
             else:   
                 score = (throughput) / power if power > 0 else 0.0
 
