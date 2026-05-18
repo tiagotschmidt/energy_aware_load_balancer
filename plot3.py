@@ -68,7 +68,7 @@ def load_and_process(mode_name, client_csv, h2_csv, h3_csv):
 
 def plot_final():
     # Load Data
-    print("Processing Performance Logs...")
+    print("Processing Round Robin Logs...")
     df_perf = load_and_process(
         "Performance", "data/client_perf.csv", "data/h2_perf.csv", "data/h3_perf.csv"
     )
@@ -100,7 +100,7 @@ def plot_final():
     # Plot 1: Latency (Only if data exists)
     if has_latency:
         axes[plot_idx].plot(
-            df_perf["rps"], df_perf["p99"], "r--s", label="Performance Only"
+            df_perf["rps"], df_perf["p99"], "r--s", label="Round Robin Only"
         )
         axes[plot_idx].plot(
             df_energy["rps"], df_energy["p99"], "g-o", label="Energy Aware"
@@ -113,7 +113,7 @@ def plot_final():
 
     # Plot 2: Total Power
     axes[plot_idx].plot(
-        df_perf["rps"], df_perf["power"], "r--s", label="Performance Only"
+        df_perf["rps"], df_perf["power"], "r--s", label="Round Robin Only"
     )
     axes[plot_idx].plot(
         df_energy["rps"], df_energy["power"], "g-o", label="Energy Aware"
@@ -126,7 +126,7 @@ def plot_final():
 
     # Plot 3: Throughput
     axes[plot_idx].plot(
-        df_perf["rps"], df_perf["throughput"], "r--s", label="Performance Only"
+        df_perf["rps"], df_perf["throughput"], "r--s", label="Round Robin Only"
     )
     axes[plot_idx].plot(
         df_energy["rps"], df_energy["throughput"], "g-o", label="Energy Aware"

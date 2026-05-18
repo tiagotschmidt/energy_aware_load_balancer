@@ -52,8 +52,8 @@ def load_and_process(mode_name, client_csv, h2_csv, h3_csv):
 
 def plot_final():
     # You must rename your logs after each run to match these names!
-    df_perf = load_and_process("Performance", "logs/client_perf.csv", "logs/h2_perf.csv", "logs/h3_perf.csv")
-    df_energy = load_and_process("Energy-Aware", "logs/client_energy.csv", "logs/h2_energy.csv", "logs/h3_energy.csv")
+    df_perf = load_and_process("Performance", "data/client_perf.csv", "data/h2_perf.csv", "data/h3_perf.csv")
+    df_energy = load_and_process("Energy-Aware", "data/client_energy.csv", "data/h2_energy.csv", "data/h3_energy.csv")
 
     if df_perf is None or df_energy is None: return
 
