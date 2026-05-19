@@ -1,14 +1,20 @@
 import socket
 import math
+import logging
 from abc import ABC, abstractmethod
 from typing import Dict, List, Set
 import bfrt_grpc.client as gc
 
+# --- Configure Logging ---
+logging.basicConfig(
+    level=logging.INFO, # Restrict to INFO to hide periodic debug data
+    format='%(asctime)s.%(msecs)03d [%(levelname)s] %(message)s',
+    datefmt='%H:%M:%S'
+)
+logger = logging.getLogger("LB_Ctrl")
+# -------------------------
+
 class ServerStat:
-    """
-    A successful instantiation of this type means the data is valid.
-    We eliminate validation control flow down the line.
-    """
     def __init__(self, host: str, score: float, util: float):
         self.host = host
         self.score = score
@@ -16,10 +22,6 @@ class ServerStat:
 
     @classmethod
     def parse(cls, raw_msg: str) -> 'ServerStat':
-        """
-        Parses raw UDP bytes into a strictly typed data structure.
-        Failure to parse happens here, before the system state is ever touched.
-        """
         parts = raw_msg.strip().split(",")
         if len(parts) != 3:
             raise ValueError(f"Expected format 'host,score,util', got: {raw_msg}")
@@ -31,23 +33,17 @@ class ServerStat:
         )
 
 class LoadBalancingPolicy(ABC):
-    """
-    Abstract Base Class defining the strict boundary for any load balancing policy.
-    Let your datatypes inform your code, don’t let your code control your datatypes.
-    """
     @abstractmethod
     def observe(self, stat: ServerStat) -> None:
-        """Update internal policy state with a new observation, if necessary."""
         pass
 
     @abstractmethod
     def evaluate(self, stats: Dict[str, ServerStat], n_servers: int) -> List[str]:
-        """Returns an ordered list of N hostnames prioritized by the policy."""
         pass
 
 class PerformanceOnlyPolicy:
     def observe(self, stat: ServerStat) -> None:
-        pass # Stateless policy
+        pass
 
     def evaluate(self, stats: Dict[str, ServerStat], n_servers: int) -> List[str]:
         ordered = sorted(stats.values(), key=lambda s: s.util)
@@ -55,7 +51,7 @@ class PerformanceOnlyPolicy:
 
 class EnergyAwarePolicy:
     def observe(self, stat: ServerStat) -> None:
-        pass # Stateless policy
+        pass
 
     def evaluate(self, stats: Dict[str, ServerStat], n_servers: int) -> List[str]:
         available = [s for s in stats.values() if s.util < 70.0]
@@ -93,7 +89,7 @@ class MabPolicy:
                 
             exploitation = self.mab_values[host]
             exploration = 0
-            if self.mab_total_pulls > 1:
+            if self.mab_total_pulls > 1 and self.mab_counts[host] > 0: # Protected div by zero
                 exploration = math.sqrt((2 * math.log(self.mab_total_pulls)) / float(self.mab_counts[host]))
             
             ucb = exploitation + exploration
@@ -108,7 +104,7 @@ class MabPolicy:
             self.mab_counts[first_host] += 1
             self.mab_total_pulls += 1
         
-        print(f"--- MAB Algorithm Evaluated Priority: {ordered_hosts} ---")
+        logger.debug(f"MAB Algorithm Evaluated Priority: {ordered_hosts}")
         return ordered_hosts
 
 # ---------------------------------------------------------
@@ -119,9 +115,10 @@ class MyLBController:
         self.server_stats: Dict[str, ServerStat] = {}
         self.current_allocations = {}
         self.installed_keys = {}
-        self.policy = policy # Dependency Injection of our Type-Safe Policy
+        self.last_priority = None  # Tracks the last routing decision
+        self.policy = policy 
 
-        print("--- Initializing BFRT Connection ---")
+        logger.info("Initializing BFRT Connection...")
         self.client_id = 0
         self.device_id = 0
 
@@ -134,27 +131,24 @@ class MyLBController:
         self.nat_table = self.bfrt_info.table_get("pipe.SwitchIngress.server_src_nat")
         self.ecmp_table = self.bfrt_info.table_get("pipe.SwitchIngress.ecmp_nhop")
 
-        print("--- Switch Programmed Successfully ---\n")
+        logger.info("Switch Programmed Successfully.")
 
         self.install_egress_rewrite_rules()
         self.install_return_path_rule()
 
-        print("Initializing Default Forwarding Rules (h2, h3)...")
-#self.update_switch_tables(["h2", "h3"])
+        logger.info("Initializing Default Forwarding Rules (h2)...")
         self.update_switch_tables(["h2"])
         self.verify_table_state()
 
-        print("Controller is ready and listening.")
+        logger.info("Controller is ready and listening.")
         self.run_listener()
 
-
     def ipv4_to_bytes(self, ip_str):
-        """Helper to convert IPv4 strings to bytearrays for BFRT."""
         import socket
         return bytearray(socket.inet_aton(ip_str))
     
     def verify_table_state(self):
-        print("\n--- VERIFYING SWITCH STATE ---")
+        logger.info("VERIFYING SWITCH STATE...")
         tables_to_check = [
             ("MyIngress.ecmp_nhop", self.ecmp_table),
             ("MyIngress.server_src_nat", self.nat_table),
@@ -162,57 +156,44 @@ class MyLBController:
 
         for name, table in tables_to_check:
             try:
-                # entry_get without keys returns all entries
                 count = sum(1 for _ in table.entry_get(self.target))
                 if count == 0:
-                    print(f"  [WARNING] Table {name} is EMPTY! (Write Failed)")
+                    logger.warning(f"Verification: Table {name} is EMPTY!")
                 else:
-                    print(f"  [OK] Table {name} has {count} entries.")
+                    logger.info(f"Verification: Table {name} has {count} entries.")
             except Exception as e:
-                print(f"  [ERROR] Failed to read {name}: {e}")
-        print("------------------------------\n")
+                logger.error(f"Failed to read {name}: {e}")
 
     def mac_to_bytes(self, mac_str):
-        """Helper to convert MAC strings to bytearrays for BFRT."""
         return bytearray.fromhex(mac_str.replace(":", ""))
 
     def install_egress_rewrite_rules(self):
-        print("Installing Egress Rewrite Rules (Source MAC Rewriting)...")
-        # These are the MACs the Switch uses as its "identity" for each segment
-        # Port 64: Client (p4server2)
-        # Port 132: Server h2 (p4server1)
-        # Port 180: Server h3 (p4server3)
+        logger.info("Installing Egress Rewrite Rules...")
         port_mac_map = {
             40:  "00:00:00:00:01:01", 
             132: "00:00:00:00:02:02", 
             180: "00:00:00:00:03:03", 
         }
         for port, smac in port_mac_map.items():
-            key = self.egress_table.make_key(
-                [gc.KeyTuple("eg_intr_md.egress_port", port)]
-            )
+            key = self.egress_table.make_key([gc.KeyTuple("eg_intr_md.egress_port", port)])
             data = self.egress_table.make_data(
                 [gc.DataTuple("smac", self.mac_to_bytes(smac))],
                 "SwitchEgress.rewrite_mac",
             )
-
             try:
-                # Use entry_add; if it fails, the verify step will catch it
                 self.egress_table.entry_add(self.target, [key], [data])
-                print(f"   > Egress Rule: Port {port} -> SMAC {smac}")
+                logger.info(f"   > Egress Rule Added: Port {port} -> SMAC {smac}")
             except Exception as e:
                 if "ALREADY_EXISTS" in str(e):
                     self.egress_table.entry_mod(self.target, [key], [data])
                 else:
-                    print(f"   > Error on Port {port}: {e}")
+                    logger.error(f"Error on Port {port}: {e}")
 
     def install_return_path_rule(self):
-        print("Installing Fixed Return Path Rules (Server -> Client)...")
+        logger.info("Installing Fixed Return Path Rules...")
         client_ip = "10.0.3.3"
-        client_port = 40  # Based on your UP port 33/0
+        client_port = 40 
         client_mac = "94:6d:ae:5c:86:b2"
-        
-        # Real Backend Server IPs from p4server1 and p4server3
         servers = ["10.0.1.2", "10.0.1.1"]
 
         for server_ip in servers:
@@ -227,27 +208,23 @@ class MyLBController:
 
             try:
                 self.nat_table.entry_add(self.target, [key], [data])
-                print(f"   > Return Rule: Src {server_ip} -> Dst {client_ip}")
+                logger.info(f"   > Return Rule Added: Src {server_ip} -> Dst {client_ip}")
             except Exception as e:
                 if "ALREADY_EXISTS" not in str(e):
-                    print(f"   > Error: {e}")
+                    logger.error(f"Error installing return path: {e}")
 
     def update_switch_tables(self, priority_hosts: List[str]):
-        """Updated to accept a strongly typed List[str] representing prioritized hostnames."""
         server_info = {
             "h2": {"ip": "10.0.1.1", "mac": "94:6d:ae:5c:87:72", "port": 132},
             "h3": {"ip": "10.0.1.2", "mac": "94:6d:ae:5d:fd:9c", "port": 180},            
         }
 
-        print(f"--- Logic Update: Switch Priority {priority_hosts} ---")
-
         for index, hostname in enumerate(priority_hosts):
             if hostname not in server_info:
-                print(f"   > Warning: Unknown hostname '{hostname}' in priority list")
+                logger.warning(f"Unknown hostname '{hostname}' in priority list")
                 continue
             
             info = server_info[hostname]
-
             key = self.ecmp_table.make_key([gc.KeyTuple("meta.ecmp_select", index)])
             data = self.ecmp_table.make_data(
                 [
@@ -262,20 +239,20 @@ class MyLBController:
             
             try:
                 if current == hostname:
-                    continue
+                    continue # Elide "no change" logs
                 elif current is not None:
                     self.ecmp_table.entry_mod(self.target, [key], [data])
+                    logger.info(f"Switch Hardware Mod | Index {index}: {current} -> {hostname}")
                 else:
                     self.ecmp_table.entry_add(self.target, [key], [data])
-                    print(f"   > Index {index}: Inserted {hostname}")
+                    logger.info(f"Switch Hardware Add | Index {index}: -> {hostname}")
 
                 self.installed_keys[index] = hostname
             except Exception as e_insert:
-                print(f"!!! CRITICAL ERROR writing Index {index} !!!")
-                print(f"    INSERT/MOD Error: {e_insert}")
+                logger.error(f"CRITICAL ERROR writing Index {index}: {e_insert}")
 
     def run_listener(self):
-        print("Starting UDP Listener on Port 50001...")
+        logger.info("Starting UDP Listener on Port 50001...")
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.bind(("0.0.0.0", 50001))
 
@@ -283,26 +260,27 @@ class MyLBController:
             data, addr = sock.recvfrom(1024)
             try:
                 stat = ServerStat.parse(data.decode())
-                
                 self.server_stats[stat.host] = stat
-                
                 self.policy.observe(stat)
-
-                print(f"Received update from {stat.host}: Score={stat.score}, Util={stat.util}%")
                 
+                # Periodic evaluation happens silently
                 ordered_hosts = self.policy.evaluate(self.server_stats, n_servers=1)
+                
                 if ordered_hosts:
-                    self.update_switch_tables(ordered_hosts)
+                    # Only log and update the hardware if the decision changed
+                    if ordered_hosts != self.last_priority:
+                        logger.info(f"Policy Shift | New Priority Order: {ordered_hosts}")
+                        self.update_switch_tables(ordered_hosts)
+                        self.last_priority = ordered_hosts
                     
             except ValueError as ve:
-                print(f"Parse Error (rejected invalid input before processing): {ve}")
+                logger.error(f"Parse Error (rejected invalid input): {ve}")
             except Exception as e:
-                print(f"Unexpected execution error: {e}")
+                logger.error(f"Unexpected execution error: {e}")
 
 if __name__ == "__main__":
     active_policy = MabPolicy() 
-#active_policy = PerformanceOnlyPolicy()
-    # active_policy = EnergyAwarePolicy()
+    # active_policy = PerformanceOnlyPolicy()
     
     ctrl = MyLBController(
         policy=active_policy, 
