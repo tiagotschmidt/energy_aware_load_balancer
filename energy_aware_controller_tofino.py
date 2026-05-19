@@ -41,7 +41,8 @@ class MyLBController:
 
         # 3. Install Default Forwarding Rules
         print("Initializing Default Forwarding Rules (h2, h3)...")
-        default_servers = [("h2", 0), ("h3", 0)]
+#default_servers = [("h2", 0), ("h3", 0)]
+        default_servers = [("h2", 0)]
         self.update_switch_tables(default_servers)
 
         # 4. Verify
@@ -223,6 +224,7 @@ class MyLBController:
         for host, (score, util) in self.server_stats.items():
             # Initialization Phase: If we have no data, prioritize exploring it
             if host not  in self.mab_explored:
+                print(f"Priotizing exploring {host}")
                 ucb_scores.append((host, float('inf')))
                 continue
                 
@@ -231,7 +233,7 @@ class MyLBController:
             
             # Exploration: Mathematical uncertainty bonus
             exploration = 0
-            if self.mab_total_pulls > 1:
+            if self.mab_total_pulls > 1 and self.mab_counts[host] > 0:
                 exploration = math.sqrt((2 * math.log(self.mab_total_pulls)) / float(self.mab_counts[host]))
             
             ucb = exploitation + exploration
@@ -243,6 +245,7 @@ class MyLBController:
         ordered = ucb_scores[:N]
 
         first_host = ordered[0][0]
+        print(f"First host: {first_host}")
 
         # 2. Add the brand new observation for the reporting server
         self.mab_counts[first_host] += 1
@@ -252,9 +255,9 @@ class MyLBController:
         return ordered
 
     def recompute_and_update(self, N=1):
-        # ordered = self.performance_only_priority(N)
+        ordered = self.performance_only_priority(N)
         # ordered = self.energy_aware_priority(N)
-        ordered = self.mab_priority(N) # <-- MAB policy activated here
+        #ordered = self.mab_priority(N) # <-- MAB policy activated here
         if ordered:
             self.update_switch_tables(ordered)
 

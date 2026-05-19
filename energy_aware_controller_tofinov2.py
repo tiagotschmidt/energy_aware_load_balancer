@@ -1,14 +1,18 @@
 import socket
 import math
-from dataclasses import dataclass
-from typing import Dict, List, Set, Protocol
+from abc import ABC, abstractmethod
+from typing import Dict, List, Set
 import bfrt_grpc.client as gc
 
-@dataclass(frozen=True)
 class ServerStat:
-    host: str
-    score: float
-    util: float
+    """
+    A successful instantiation of this type means the data is valid.
+    We eliminate validation control flow down the line.
+    """
+    def __init__(self, host: str, score: float, util: float):
+        self.host = host
+        self.score = score
+        self.util = util
 
     @classmethod
     def parse(cls, raw_msg: str) -> 'ServerStat':
@@ -26,18 +30,20 @@ class ServerStat:
             util=float(parts[2].strip())
         )
 
-class LoadBalancingPolicy(Protocol):
+class LoadBalancingPolicy(ABC):
     """
-    Protocol defining the strict boundary for any load balancing policy.
+    Abstract Base Class defining the strict boundary for any load balancing policy.
     Let your datatypes inform your code, don’t let your code control your datatypes.
     """
+    @abstractmethod
     def observe(self, stat: ServerStat) -> None:
         """Update internal policy state with a new observation, if necessary."""
-        ...
+        pass
 
+    @abstractmethod
     def evaluate(self, stats: Dict[str, ServerStat], n_servers: int) -> List[str]:
         """Returns an ordered list of N hostnames prioritized by the policy."""
-        ...
+        pass
 
 class PerformanceOnlyPolicy:
     def observe(self, stat: ServerStat) -> None:
@@ -134,7 +140,8 @@ class MyLBController:
         self.install_return_path_rule()
 
         print("Initializing Default Forwarding Rules (h2, h3)...")
-        self.update_switch_tables(["h2", "h3"])
+#self.update_switch_tables(["h2", "h3"])
+        self.update_switch_tables(["h2"])
         self.verify_table_state()
 
         print("Controller is ready and listening.")
@@ -164,6 +171,10 @@ class MyLBController:
             except Exception as e:
                 print(f"  [ERROR] Failed to read {name}: {e}")
         print("------------------------------\n")
+
+    def mac_to_bytes(self, mac_str):
+        """Helper to convert MAC strings to bytearrays for BFRT."""
+        return bytearray.fromhex(mac_str.replace(":", ""))
 
     def install_egress_rewrite_rules(self):
         print("Installing Egress Rewrite Rules (Source MAC Rewriting)...")
@@ -290,6 +301,7 @@ class MyLBController:
 
 if __name__ == "__main__":
     active_policy = MabPolicy() 
+#active_policy = PerformanceOnlyPolicy()
     # active_policy = EnergyAwarePolicy()
     
     ctrl = MyLBController(
