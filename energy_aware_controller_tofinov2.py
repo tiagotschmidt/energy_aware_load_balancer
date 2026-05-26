@@ -18,7 +18,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("LB_Ctrl")
 
-PERFORMANCE_POLICY = True  # Set to False to enable MAB-based energy-aware priority
+PERFORMANCE_POLICY = False  # Set to False to enable MAB-based energy-aware priority
+PULLS_BEFORE_EXPLORATION = (
+    5  # Number of times to pull a host before considering it "explored" in MAB
+)
+
 
 class ServerStat:
     def __init__(self, host: str, score: float, util: float):
@@ -45,7 +49,9 @@ class LoadBalancingPolicy(ABC):
         pass
 
     @abstractmethod
-    def evaluate(self, stats: Dict[str, ServerStat], util: float, n_servers: int) -> List[str]:
+    def evaluate(
+        self, stats: Dict[str, ServerStat], util: float, n_servers: int
+    ) -> List[str]:
         pass
 
 
@@ -53,10 +59,12 @@ class PerformanceOnlyPolicy:
     def observe(self, stat: ServerStat) -> None:
         pass
 
-    def evaluate(self, stats: Dict[str, ServerStat], util: float, n_servers: int) -> List[str]:
+    def evaluate(
+        self, stats: Dict[str, ServerStat], util: float, n_servers: int
+    ) -> List[str]:
         ordered = sorted(stats.values(), key=lambda s: s.util)
         logger.info(
-            f"Performance-Only Evaluation | Server Scores: {[f'{s.host}(util={s.util:.1f}%)' for s in ordered]}"
+            f"Performance-Only Evaluation | Server Scores: {[f'{s.host} (util={s.util:.1f}%)' for s in ordered]}"
         )
         selected_servers = [s.host for s in ordered[:n_servers]]
         logger.info(f"Performance-Only Evaluation | Selected: {selected_servers}")
@@ -67,7 +75,9 @@ class EnergyAwarePolicy:
     def observe(self, stat: ServerStat) -> None:
         pass
 
-    def evaluate(self, stats: Dict[str, ServerStat], util: float, n_servers: int) -> List[str]:
+    def evaluate(
+        self, stats: Dict[str, ServerStat], util: float, n_servers: int
+    ) -> List[str]:
         available = [s for s in stats.values() if s.util < 70.0]
         busy = [s for s in stats.values() if s.util >= 70.0]
 
@@ -88,10 +98,14 @@ class EnergyAwarePolicy:
 class MabPolicy:
     def __init__(self):
         self.mab_counts: Dict[str, int] = {}
-        self.mab_explored: Dict[str,Set[str]] = {}
+        self.mab_explored: Dict[str, Set[str]] = {}
         self.mab_values: Dict[str, float] = {}
         self.mab_total_pulls: int = 0
-        
+
+        self.mab_explored["low"] = set()
+        self.mab_explored["medium"] = set()
+        self.mab_explored["high"] = set()
+
     def get_bucket(self, util):
         if util < 40:
             return "low"
@@ -106,7 +120,7 @@ class MabPolicy:
         )
         if stat.host not in self.mab_counts:
             logger.info(f"New Host Detected in MAB: {stat.host}")
-            self.mab_counts[stat.host] = 0
+            self.mab_counts[stat.host] = {"low": 0.0, "medium": 0.0, "high": 0.0}
             self.mab_values[stat.host] = {"low": 0.0, "medium": 0.0, "high": 0.0}
 
         if stat.score > 0:
@@ -121,25 +135,28 @@ class MabPolicy:
                 )
                 self.mab_values[stat.host][bucket] = stat.score
 
-    def evaluate(self, stats: Dict[str, ServerStat], util: float, n_servers: int) -> List[str]:
+    def evaluate(
+        self, stats: Dict[str, ServerStat], util: float, n_servers: int
+    ) -> List[str]:
         ucb_scores = []
         bucket = self.get_bucket(util)
 
         for host, stat in stats.items():
-            if host not in self.mab_explored[bucket]:
+            if self.mab_counts[host][bucket] < PULLS_BEFORE_EXPLORATION:
                 logger.info(
                     f"Host {host} has not been explored yet. Assigning infinite UCB for exploration."
                 )
-                ucb_scores.append((host, float("inf")))
+                logger.info(f"Host {host} has been pulled {self.mab_counts[host][bucket]} times, which is less than the threshold of {PULLS_BEFORE_EXPLORATION}.")
+                ucb_scores.append((host, float("inf"), self.mab_counts[host][bucket]))
                 continue
 
             exploitation = self.mab_values[host][bucket]
             exploration = 0
             if (
-                self.mab_total_pulls > 1 and self.mab_counts[host] > 0
+                self.mab_total_pulls > 1 and self.mab_counts[host][bucket] > 0
             ):  # Protected div by zero
                 exploration = math.sqrt(
-                    (2 * math.log(self.mab_total_pulls)) / float(self.mab_counts[host])
+                    (2 * math.log(self.mab_total_pulls)) / float(self.mab_counts[host][bucket])
                 )
 
             ucb = exploitation + exploration
@@ -147,23 +164,25 @@ class MabPolicy:
                 f"MAB UCB Calculation | Host: {host}, Bucket: {bucket}, Exploitation: {exploitation:.4f}, Exploration: {exploration:.4f}, UCB: {ucb:.4f}"
             )
             if stat.util < 95.0:
-                ucb_scores.append((host, ucb))
+                ucb_scores.append((host, ucb, self.mab_counts[host][bucket]))
 
         ucb_scores.sort(key=lambda x: x[1], reverse=True)
         logger.info(
-            f"MAB Evaluation | UCB Scores: {[f'{h}(UCB={s:.4f})' for h, s in ucb_scores]}"
+            f"MAB Evaluation | UCB Scores: {[f'{h} (UCB={s:.4f}, Pulls={c})' for h, s, c in ucb_scores]}"
         )
         ordered_hosts = [x[0] for x in ucb_scores[:n_servers]]
 
-        first_host_is_inf = ordered_hosts and ucb_scores[0][1] == float("inf")
+        explored_first_host = (
+            ordered_hosts[0] and ordered_hosts[0][0] in self.mab_explored[bucket]
+        )
 
         if ordered_hosts:
             logger.info(f"MAB Evaluation | Selected Host: {ordered_hosts[0]}")
             first_host = ordered_hosts[0]
 
-            if not first_host_is_inf:
+            if explored_first_host:
                 logger.info(f"MAB Update | Incrementing count for {first_host}")
-                self.mab_counts[first_host] += 1
+                self.mab_counts[first_host][bucket] += 1
                 self.mab_total_pulls += 1
 
         logger.debug(f"MAB Algorithm Evaluated Priority: {ordered_hosts}")
@@ -346,7 +365,9 @@ class MyLBController:
                 self.policy.observe(stat)
 
                 # Periodic evaluation happens silently
-                ordered_hosts = self.policy.evaluate(self.server_stats, stat.util,n_servers=1)
+                ordered_hosts = self.policy.evaluate(
+                    self.server_stats, stat.util, n_servers=1
+                )
 
                 if ordered_hosts:
                     # Only log and update the hardware if the decision changed
@@ -365,7 +386,7 @@ class MyLBController:
 
 if __name__ == "__main__":
     if PERFORMANCE_POLICY:
-        # active_policy = PerformanceOnlyPolicy()
+        active_policy = PerformanceOnlyPolicy()
         logger.info(
             "Starting Load Balancer Controller. Using Performance-Only Priority"
         )
