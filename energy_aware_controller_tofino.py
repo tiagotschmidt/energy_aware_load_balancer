@@ -2,35 +2,42 @@ import socket
 import math
 import logging
 import bfrt_grpc.client as gc
+import datetime
+
+log_filename = f"lb_controller_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
 # --- Configure Logging ---
 logging.basicConfig(
-    level=logging.INFO, # Restrict to INFO to hide periodic debug data
-    format='%(asctime)s.%(msecs)03d [%(levelname)s] %(message)s',
-    datefmt='%H:%M:%S'
+    level=logging.INFO,  # Restrict to INFO to hide periodic debug data
+    format="%(asctime)s.%(msecs)03d [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+    filename=log_filename,
+    filemode="w",
 )
 logger = logging.getLogger("LB_Ctrl")
-# -------------------------
+    
+PERFORMANCE_POLICY = True  # Set to False to enable MAB-based energy-aware priority
 
 class MyLBController:
     def __init__(self, program_name="load_balance", grpc_addr="127.0.0.1:50052"):
         self.server_stats = {}
         self.current_allocations = {}
         self.installed_keys = {}
-        self.last_priority = None    # Tracks the last routing decision
+        self.last_priority = None  # Tracks the last routing decision
 
-        # --- MAB (D-UCB) State Variables ---
-        self.mab_counts = {}         
-        self.mab_explored = set()    
-        self.mab_values = {}         
-        self.mab_total_pulls = 0     
+        self.mab_counts = {}
+        self.mab_explored = set()
+        self.mab_values = {}
+        self.mab_total_pulls = 0
         # -----------------------------------
 
         logger.info("Initializing BFRT Connection...")
         self.client_id = 0
         self.device_id = 0
 
-        self.bfrt_interface = gc.ClientInterface(grpc_addr, self.client_id, self.device_id)
+        self.bfrt_interface = gc.ClientInterface(
+            grpc_addr, self.client_id, self.device_id
+        )
         self.bfrt_interface.bind_pipeline_config(program_name)
         self.bfrt_info = self.bfrt_interface.bfrt_info_get(program_name)
         self.target = gc.Target(device_id=self.device_id, pipe_id=0xFFFF)
@@ -59,12 +66,14 @@ class MyLBController:
     def install_egress_rewrite_rules(self):
         logger.info("Installing Egress Rewrite Rules...")
         port_mac_map = {
-            40:  "00:00:00:00:01:01", 
-            132: "00:00:00:00:02:02", 
-            180: "00:00:00:00:03:03", 
+            40: "00:00:00:00:01:01",
+            132: "00:00:00:00:02:02",
+            180: "00:00:00:00:03:03",
         }
         for port, smac in port_mac_map.items():
-            key = self.egress_table.make_key([gc.KeyTuple("eg_intr_md.egress_port", port)])
+            key = self.egress_table.make_key(
+                [gc.KeyTuple("eg_intr_md.egress_port", port)]
+            )
             data = self.egress_table.make_data(
                 [gc.DataTuple("smac", self.mac_to_bytes(smac))],
                 "SwitchEgress.rewrite_mac",
@@ -86,18 +95,25 @@ class MyLBController:
         servers = ["10.0.1.2", "10.0.1.1"]
 
         for server_ip in servers:
-            key = self.nat_table.make_key([
-                gc.KeyTuple("hdr.ipv4.srcAddr", self.ipv4_to_bytes(server_ip)),
-                gc.KeyTuple("hdr.ipv4.dstAddr", self.ipv4_to_bytes(client_ip)),
-            ])
-            data = self.nat_table.make_data([
-                gc.DataTuple("client_mac", self.mac_to_bytes(client_mac)),
-                gc.DataTuple("port", client_port),
-            ], "SwitchIngress.nat_reply_to_client")
+            key = self.nat_table.make_key(
+                [
+                    gc.KeyTuple("hdr.ipv4.srcAddr", self.ipv4_to_bytes(server_ip)),
+                    gc.KeyTuple("hdr.ipv4.dstAddr", self.ipv4_to_bytes(client_ip)),
+                ]
+            )
+            data = self.nat_table.make_data(
+                [
+                    gc.DataTuple("client_mac", self.mac_to_bytes(client_mac)),
+                    gc.DataTuple("port", client_port),
+                ],
+                "SwitchIngress.nat_reply_to_client",
+            )
 
             try:
                 self.nat_table.entry_add(self.target, [key], [data])
-                logger.info(f"   > Return Rule Added: Src {server_ip} -> Dst {client_ip}")
+                logger.info(
+                    f"   > Return Rule Added: Src {server_ip} -> Dst {client_ip}"
+                )
             except Exception as e:
                 if "ALREADY_EXISTS" not in str(e):
                     logger.error(f"Error installing return path: {e}")
@@ -105,7 +121,7 @@ class MyLBController:
     def update_switch_tables(self, priority_list):
         server_info = {
             "h2": {"ip": "10.0.1.1", "mac": "94:6d:ae:5c:87:72", "port": 132},
-            "h3": {"ip": "10.0.1.2", "mac": "94:6d:ae:5d:fd:9c", "port": 180},            
+            "h3": {"ip": "10.0.1.2", "mac": "94:6d:ae:5d:fd:9c", "port": 180},
         }
 
         for index, server_tuple in enumerate(priority_list):
@@ -128,10 +144,12 @@ class MyLBController:
             current = self.installed_keys.get(index)
             try:
                 if current == hostname:
-                    continue # Elide "no change" logs
+                    continue  # Elide "no change" logs
                 elif current is not None:
                     self.ecmp_table.entry_mod(self.target, [key], [data])
-                    logger.info(f"Switch Hardware Mod | Index {index}: {current} -> {hostname}")
+                    logger.info(
+                        f"Switch Hardware Mod | Index {index}: {current} -> {hostname}"
+                    )
                 else:
                     self.ecmp_table.entry_add(self.target, [key], [data])
                     logger.info(f"Switch Hardware Add | Index {index}: -> {hostname}")
@@ -165,7 +183,7 @@ class MyLBController:
                 msg = data.decode().strip()
                 host, score, util = msg.split(",")
                 score, util = float(score), float(util)
-                
+
                 self.server_stats[host] = (score, util)
                 self.update_mab_state(host, reward=score)
 
@@ -175,11 +193,14 @@ class MyLBController:
                 logger.error(f"Error parsing message: {e}")
 
     def update_mab_state(self, host, reward):
+        logger.info(f"MAB Update | Host: {host}, Reward: {reward}")
         if host not in self.mab_counts:
+            logger.info(f"New Host Detected in MAB: {host}")
             self.mab_counts[host] = 0
             self.mab_values[host] = 0.0
-       
+
         if reward > 0:
+            logger.info(f"Positive Reward for {host}: {reward:.4f}")
             self.mab_explored.add(host)
             self.mab_values[host] = reward
 
@@ -187,36 +208,45 @@ class MyLBController:
         ucb_scores = []
         for host, (score, util) in self.server_stats.items():
             if host not in self.mab_explored:
-                ucb_scores.append((host, float('inf')))
+                logger.info(f"Host {host} has not been explored yet. Assigning infinite UCB for exploration.")
+                ucb_scores.append((host, float("inf")))
                 continue
-                
+
             exploitation = self.mab_values[host]
             exploration = 0
             if self.mab_total_pulls > 1 and self.mab_counts[host] > 0:
-                exploration = math.sqrt((2 * math.log(self.mab_total_pulls)) / float(self.mab_counts[host]))
-            
+                exploration = math.sqrt(
+                    (2 * math.log(self.mab_total_pulls)) / float(self.mab_counts[host])
+                )
+
             ucb = exploitation + exploration
-            if util < 95.0:    
+            logger.info("MAB UCB Score | Host: %s, Exploitation: %.4f, Exploration: %.4f, UCB: %.4f",
+                        host, exploitation, exploration, ucb)
+            if util < 95.0:
                 ucb_scores.append((host, ucb))
-            
+
         ucb_scores.sort(key=lambda x: x[1], reverse=True)
+        
+        logger.info("MAB UCB Scores | " + ", ".join([f"{h}: {s:.4f}" for h, s in ucb_scores]))
+        
         ordered = ucb_scores[:N]
 
         if ordered:
+            logger.info(f"MAB Selected Hosts: {[h for h, _ in ordered]}")
             first_host = ordered[0][0]
             self.mab_counts[first_host] += 1
             self.mab_total_pulls += 1
-            
+
         return ordered
 
     def recompute_and_update(self, N=1):
         ordered = self.performance_only_priority(N)
         # ordered = self.mab_priority(N)
-        
+
         if ordered:
             # Extract just the hostnames to check for state changes
             current_priority = [x[0] for x in ordered]
-            
+
             # Only log and push to switch if the decision actually changed
             if current_priority != self.last_priority:
                 logger.info(f"Policy Shift | New Priority Order: {current_priority}")
@@ -227,13 +257,19 @@ class MyLBController:
         allServers = []
         for host, (score, util) in self.server_stats.items():
             allServers.append((host, util))
-            
+
         allServers.sort(key=lambda x: x[1], reverse=False)
         return allServers[:N]
 
     def ipv4_to_bytes(self, ip_str):
         import socket
+
         return bytearray(socket.inet_aton(ip_str))
 
+
 if __name__ == "__main__":
+    if PERFORMANCE_POLICY:
+        logger.info("Starting Load Balancer Controller. Using Performance-Only Priority")
+    else:
+        logger.info("Starting Load Balancer Controller. Using MAB-Based Energy-Aware Priority")
     ctrl = MyLBController(program_name="load_balance", grpc_addr="127.0.0.1:50052")
