@@ -88,7 +88,7 @@ class EnergyAwarePolicy:
 class MabPolicy:
     def __init__(self):
         self.mab_counts: Dict[str, int] = {}
-        self.mab_explored: Set[str] = set()
+        self.mab_explored: Dict[str,Set[str]] = {}
         self.mab_values: Dict[str, float] = {}
         self.mab_total_pulls: int = 0
         
@@ -110,8 +110,9 @@ class MabPolicy:
             self.mab_values[stat.host] = {"low": 0.0, "medium": 0.0, "high": 0.0}
 
         if stat.score > 0:
+            bucket = self.get_bucket(stat.util)
             logger.info(f"Positive Score for {stat.host}: {stat.score:.4f}")
-            self.mab_explored.add(stat.host)
+            self.mab_explored[bucket].add(stat.host)
 
             bucket = self.get_bucket(stat.util)
             if stat.score > self.mab_values[stat.host][bucket]:
@@ -122,16 +123,16 @@ class MabPolicy:
 
     def evaluate(self, stats: Dict[str, ServerStat], util: float, n_servers: int) -> List[str]:
         ucb_scores = []
+        bucket = self.get_bucket(util)
 
         for host, stat in stats.items():
-            if host not in self.mab_explored:
+            if host not in self.mab_explored[bucket]:
                 logger.info(
                     f"Host {host} has not been explored yet. Assigning infinite UCB for exploration."
                 )
                 ucb_scores.append((host, float("inf")))
                 continue
 
-            bucket = self.get_bucket(util)
             exploitation = self.mab_values[host][bucket]
             exploration = 0
             if (
