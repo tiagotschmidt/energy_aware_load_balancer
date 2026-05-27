@@ -173,7 +173,7 @@ class MabPolicy:
         ordered_hosts = [x[0] for x in ucb_scores[:n_servers]]
 
         explored_first_host = (
-            ordered_hosts[0] and ordered_hosts[0][0] in self.mab_explored[bucket]
+            ordered_hosts[0] and ordered_hosts[0] in self.mab_explored[bucket]
         )
 
         if ordered_hosts:
