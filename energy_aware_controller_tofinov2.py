@@ -8,6 +8,8 @@ LOCAL_MODE = os.getenv("LOCAL_MODE", "0") == "1"
 if not LOCAL_MODE:
     import bfrt_grpc.client as gc
 import datetime
+import random
+from collections import deque
 
 log_filename = f"lb_controller_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
@@ -99,6 +101,95 @@ class EnergyAwarePolicy:
         )
         return selected_servers
 
+
+class HostEstimator:
+    def __init__(self, host: str, window_size: int = 20):
+        self.host = host
+        self.history = deque(maxlen=window_size)
+
+    def add_sample(self, util: float, power: float):
+        self.history.append((util, power))
+
+    @property
+    def sample_count(self) -> int:
+        return len(self.history)
+
+    def get_marginal_cost(self) -> float:
+        """
+        Calculates dP/dU using OLS linear regression over the sliding window.
+        Returns the slope (watts per 1% utilization increase).
+        """
+        n = len(self.history)
+        if n < 2:
+            return 0.0
+
+        sum_x = sum(u for u, p in self.history)
+        sum_y = sum(p for u, p in self.history)
+        sum_xx = sum(u * u for u, p in self.history)
+        sum_xy = sum(u * p for u, p in self.history)
+
+        denominator = (n * sum_xx) - (sum_x * sum_x)
+        if denominator == 0:
+            return 0.0  # Avoid division by zero if util is completely static
+
+        slope = ((n * sum_xy) - (sum_x * sum_y)) / denominator
+        # Marginal cost for power should logically not be negative in our range.
+        return max(0.0, slope)
+
+
+class MarginalCostPolicy(LoadBalancingPolicy):
+    def __init__(self, bootstrap_samples: int = 5, epsilon: float = 0.05, window_size: int = 20):
+        self.estimators: Dict[str, HostEstimator] = {}
+        self.bootstrap_samples = bootstrap_samples
+        # self.epsilon = epsilon
+        self.window_size = window_size
+
+    def observe(self, stat: ServerStat) -> None:
+        if stat.host not in self.estimators:
+            logger.info(f"MarginalCost | New Host Detected: {stat.host}. Initializing estimator.")
+            self.estimators[stat.host] = HostEstimator(stat.host, self.window_size)
+
+        self.estimators[stat.host].add_sample(stat.util, stat.power)
+        logger.info(f"MarginalCost | Observed {stat.host}: Util={stat.util:.1f}%, Power={stat.power:.1f}W")
+
+    def evaluate(
+        self, stats: Dict[str, ServerStat], util: float, n_servers: int
+    ) -> List[str]:
+        if not stats:
+            return []
+
+        available_hosts = list(stats.keys())
+
+        for host in available_hosts:
+            estimator = self.estimators.get(host)
+            if estimator is None or estimator.sample_count < self.bootstrap_samples:
+                logger.info(f"MarginalCost | Bootstrapping: Force-picking under-sampled host {host}")
+                return [host] * n_servers
+
+        # # 2. Continuous Exploration (Epsilon-Greedy)
+        # if random.random() < self.epsilon:
+        #     explored_host = random.choice(available_hosts)
+        #     logger.info(f"MarginalCost | Exploration Roll: Randomly picking {explored_host}")
+        #     return [explored_host] * n_servers
+
+        marginal_costs = []
+        for host in available_hosts:
+            estimator = self.estimators[host]
+            cost = estimator.get_marginal_cost()
+            marginal_costs.append((host, cost))
+
+        # Sort ascending by marginal cost to find the lowest power penalty
+        marginal_costs.sort(key=lambda x: x[1])
+        logger.info(
+            f"MarginalCost | Exploitation | Costs: {[f'{h} (dP/dU={c:.4f})' for h, c in marginal_costs]}"
+        )
+        
+        selected_servers = [h for h, c in marginal_costs[:n_servers]]
+        
+        if len(selected_servers) < n_servers:
+             selected_servers.extend([selected_servers[-1]] * (n_servers - len(selected_servers)))
+             
+        return selected_servers
 
 class MabPolicy:
     def __init__(self):
@@ -404,9 +495,10 @@ if __name__ == "__main__":
             "Starting Load Balancer Controller. Using Performance-Only Priority"
         )
     else:
-        active_policy = MabPolicy()
+        # active_policy = MabPolicy()
+        active_policy = MarginalCostPolicy()
         logger.info(
-            "Starting Load Balancer Controller. Using MAB-Based Energy-Aware Priority"
+            "Starting Load Balancer Controller. Using Marginal-cost Energy-Aware Priority"
         )
 
     ctrl = MyLBController(
