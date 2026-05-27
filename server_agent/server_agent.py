@@ -5,6 +5,7 @@ import logging
 import argparse
 import csv
 import glob
+import random
 
 # --- Configuration ---
 # SWITCH_IP = "127.0.0.1"
@@ -89,6 +90,7 @@ def main():
         default="intel",
         help="Telemetry driver: 'intel' (RAPL) or 'amd' (Zenpower)",
     )
+    parser.add_argument("--local", action="store_true", help="Run with simulated telemetry") 
     args = parser.parse_args()
 
     hwmon_path = get_zenpower_path() if args.driver == "amd" else None
@@ -118,6 +120,11 @@ def main():
     _, prev_idle, prev_total = get_cpu_utilization(0, 0)
     prev_energy = None
     prev_time = time.time()
+    
+    if args.local:
+        SWITCH_IP = "127.0.0.1"
+    else:
+        SWITCH_IP = "143.54.51.26"
 
     try:
         while True:
@@ -125,15 +132,21 @@ def main():
             curr_time = time.time()
             time_delta = curr_time - prev_time
 
-            util, curr_idle, curr_total = get_cpu_utilization(prev_idle, prev_total)
-            power, curr_energy = get_power_watts(
+            if args.local:
+                util = random.uniform(10.0, 95.0)
+                power = 10.0 + (util * 0.5)
+                throughput = random.uniform(100.0, 1000.0)
+                mode = "LOCAL"
+            else:
+                util, curr_idle, curr_total = get_cpu_utilization(prev_idle, prev_total)
+                power, curr_energy = get_power_watts(
                 args.driver, hwmon_path, prev_energy, time_delta
-            )
+                )
 
-            mode = "REAL"
-            if power is None:
-                power = 10.0 + (util * 0.5)  # Fallback Simulation
-                mode = "SIM"
+                mode = "REAL"
+                if power is None:
+                    power = 10.0 + (util * 0.5)  # Fallback Simulation
+                    mode = "SIM"
 
 
             # score = Throughput / Power
@@ -172,8 +185,9 @@ def main():
                 f"[{mode}] Driver: {args.driver} | Host: {args.host_name} | Score: {score:.3f} | Pwr: {power:.1f}W"
             )
 
-            # Update states
-            prev_idle, prev_total, prev_energy, prev_time = (
+            if not args.local:
+                # Update states
+                prev_idle, prev_total, prev_energy, prev_time = (
                 curr_idle,
                 curr_total,
                 curr_energy,

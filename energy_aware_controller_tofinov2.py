@@ -1,9 +1,12 @@
+import os
 import socket
 import math
 import logging
 from abc import ABC, abstractmethod
 from typing import Dict, List, Set
-import bfrt_grpc.client as gc
+LOCAL_MODE = os.getenv("LOCAL_MODE", "0") == "1"
+if not LOCAL_MODE:
+    import bfrt_grpc.client as gc
 import datetime
 
 log_filename = f"lb_controller_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
@@ -205,29 +208,32 @@ class MyLBController:
         self.last_priority = None  # Tracks the last routing decision
         self.policy = policy
 
-        logger.info("Initializing BFRT Connection...")
-        self.client_id = 0
-        self.device_id = 0
+        if LOCAL_MODE:
+            logger.info("Running in LOCAL MODE. Switch hardware interactions are disabled.")
+        else:
+            logger.info("Initializing BFRT Connection...")
+            self.client_id = 0
+            self.device_id = 0
 
-        self.bfrt_interface = gc.ClientInterface(
-            grpc_addr, self.client_id, self.device_id
-        )
-        self.bfrt_interface.bind_pipeline_config(program_name)
-        self.bfrt_info = self.bfrt_interface.bfrt_info_get(program_name)
-        self.target = gc.Target(device_id=self.device_id, pipe_id=0xFFFF)
+            self.bfrt_interface = gc.ClientInterface(
+                grpc_addr, self.client_id, self.device_id
+            )
+            self.bfrt_interface.bind_pipeline_config(program_name)
+            self.bfrt_info = self.bfrt_interface.bfrt_info_get(program_name)
+            self.target = gc.Target(device_id=self.device_id, pipe_id=0xFFFF)
 
-        self.egress_table = self.bfrt_info.table_get("pipe.SwitchEgress.send_frame")
-        self.nat_table = self.bfrt_info.table_get("pipe.SwitchIngress.server_src_nat")
-        self.ecmp_table = self.bfrt_info.table_get("pipe.SwitchIngress.ecmp_nhop")
+            self.egress_table = self.bfrt_info.table_get("pipe.SwitchEgress.send_frame")
+            self.nat_table = self.bfrt_info.table_get("pipe.SwitchIngress.server_src_nat")
+            self.ecmp_table = self.bfrt_info.table_get("pipe.SwitchIngress.ecmp_nhop")
 
-        logger.info("Switch Programmed Successfully.")
+            logger.info("Switch Programmed Successfully.")
 
-        self.install_egress_rewrite_rules()
-        self.install_return_path_rule()
+            self.install_egress_rewrite_rules()
+            self.install_return_path_rule()
 
-        logger.info("Initializing Default Forwarding Rules (h2)...")
-        self.update_switch_tables(["h2"])
-        self.verify_table_state()
+            logger.info("Initializing Default Forwarding Rules (h2)...")
+            self.update_switch_tables(["h2"])
+            self.verify_table_state()
 
         logger.info("Controller is ready and listening.")
         self.run_listener()
@@ -313,6 +319,11 @@ class MyLBController:
                     logger.error(f"Error installing return path: {e}")
 
     def update_switch_tables(self, priority_hosts: List[str]):
+        if LOCAL_MODE:
+            # Just log the state changes in local mode
+            logger.info(f"[LOCAL STUB] Switch hardware would be updated with: {priority_hosts}")
+            return
+
         server_info = {
             "h2": {"ip": "10.0.1.1", "mac": "94:6d:ae:5c:87:72", "port": 132},
             "h3": {"ip": "10.0.1.2", "mac": "94:6d:ae:5d:fd:9c", "port": 180},
