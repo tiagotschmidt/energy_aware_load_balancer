@@ -28,21 +28,23 @@ PULLS_BEFORE_EXPLORATION = (
 
 
 class ServerStat:
-    def __init__(self, host: str, score: float, util: float):
+    def __init__(self, host: str, score: float, util: float,power:float):
         self.host = host
         self.score = score
         self.util = util
+        self.power = power
 
     @classmethod
     def parse(cls, raw_msg: str) -> "ServerStat":
         parts = raw_msg.strip().split(",")
-        if len(parts) != 3:
-            raise ValueError(f"Expected format 'host,score,util', got: {raw_msg}")
+        if len(parts) != 4:
+            raise ValueError(f"Expected format 'host,score,util,power', got: {raw_msg}")
 
         return cls(
             host=parts[0].strip(),
             score=float(parts[1].strip()),
             util=float(parts[2].strip()),
+            power=float(parts[3].strip())
         )
 
 
@@ -119,7 +121,7 @@ class MabPolicy:
 
     def observe(self, stat: ServerStat) -> None:
         logger.info(
-            f"MAB Observe | Host: {stat.host}, Score: {stat.score:.4f}, Util: {stat.util:.1f}%"
+            f"MAB Observe | Host: {stat.host}, Score: {stat.score:.4f}, Util: {stat.util:.1f}%, Power: {stat.power:.2f}W"
         )
         if stat.host not in self.mab_counts:
             logger.info(f"New Host Detected in MAB: {stat.host}")

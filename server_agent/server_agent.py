@@ -179,7 +179,7 @@ def main():
                 )
 
             sock.sendto(
-                f"{args.host_name},{score:.4f},{util:.2f}".encode(), (SWITCH_IP, PORT)
+                f"{args.host_name},{score:.4f},{util:.2f},{power:.2f}".encode(), (SWITCH_IP, PORT)
             )
             logging.info(
                 f"[{mode}] Driver: {args.driver} | Host: {args.host_name} | Score: {score:.3f} | Pwr: {power:.1f}W"
