@@ -4,12 +4,12 @@ import math
 import logging
 from abc import ABC, abstractmethod
 from typing import Dict, List, Set
+import datetime
+from collections import deque
 LOCAL_MODE = os.getenv("LOCAL_MODE", "0") == "1"
 if not LOCAL_MODE:
     import bfrt_grpc.client as gc
-import datetime
-import random
-from collections import deque
+
 
 log_filename = f"lb_controller_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
@@ -158,7 +158,10 @@ class MarginalCostPolicy(LoadBalancingPolicy):
         if not stats:
             return []
 
-        available_hosts = list(stats.keys())
+        available_hosts = [
+            host for host, stat in stats.items() 
+            if stat.utilization < 0.95
+        ]
 
         for host in available_hosts:
             estimator = self.estimators.get(host)
