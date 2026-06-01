@@ -186,7 +186,8 @@ class MarginalCostPolicy(LoadBalancingPolicy):
         for host in available_hosts:
             estimator = self.estimators[host]
             cost = estimator.get_marginal_cost()
-            efficiency_score = 1 / cost if cost > 0 else 1
+            EPSILON = 1e-6
+            efficiency_score = 1 / (cost + EPSILON)
             host_utilization = max(0.0, min(1.0, stats[host].util / 100))
             weight = efficiency_score * pow(
                 1 - host_utilization, average_cluster_utilizaton
