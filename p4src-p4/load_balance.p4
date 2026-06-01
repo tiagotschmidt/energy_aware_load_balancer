@@ -126,19 +126,19 @@ control SwitchIngress(
         in ingress_intrinsic_metadata_from_parser_t ig_prsr_md,
         inout ingress_intrinsic_metadata_for_deparser_t ig_dprsr_md,
         inout ingress_intrinsic_metadata_for_tm_t ig_tm_md) {
-    const bit<32> POOL_SIZE = 2;
+    const bit<32> POOL_SIZE = 20;
     Register<bit<32>, bit<32>>(1) rr_register;  
     RegisterAction<bit<32>, bit<32>, bit<32>>(rr_register) rr_action = {
     void apply(inout bit<32> state_val, out bit<32> return_val) {
         return_val = state_val;
 
-        // // 2. Increment and wrap around (simulating the % operator)
-        // if (state_val == POOL_SIZE - 1) {
-        //     state_val = 0;
-        // } else {
-        //     state_val = state_val + 1;
-        // }
-        state_val = 0;
+        // 2. Increment and wrap around (simulating the % operator)
+        if (state_val == POOL_SIZE - 1) {
+            state_val = 0;
+        } else {
+            state_val = state_val + 1;
+        }
+        // state_val = 0;
     }
     };
     

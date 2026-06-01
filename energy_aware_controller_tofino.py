@@ -24,10 +24,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("LB_Ctrl")
 
-PERFORMANCE_POLICY = False
-PULLS_BEFORE_EXPLORATION = (
-    5  # Number of times to pull a host before considering it "explored" in MAB
-)
+NUMBER_SWITCH_TABLE_ENTRIES = 20
+
 
 class ServerStat:
     def __init__(self, host: str, score: float, util: float, power: float):
@@ -62,7 +60,7 @@ class LoadBalancingPolicy(ABC):
         pass
 
 
-class PerformanceOnlyPolicy:
+class LeastUtilizedPolicy:
     def observe(self, stat: ServerStat) -> None:
         pass
 
@@ -71,11 +69,21 @@ class PerformanceOnlyPolicy:
     ) -> List[str]:
         ordered = sorted(stats.values(), key=lambda s: s.util)
         logger.info(
-            f"Performance-Only Evaluation | Server Scores: {[f'{s.host} (util={s.util:.1f}%)' for s in ordered]}"
+            f"LeastUtilized Evaluation | Server Scores: {[f'{s.host} (util={s.util:.1f}%)' for s in ordered]}"
         )
-        selected_servers = [s.host for s in ordered[:n_servers]]
-        logger.info(f"Performance-Only Evaluation | Selected: {selected_servers}")
+        selected_servers = [s.host for s in ordered[:1]]
+        logger.info(f"LeastUtilized Evaluation | Selected: {selected_servers}")
+
+        if len(selected_servers) < n_servers:
+            logger.warning(
+                f"Not enough servers available for selection. Needed {n_servers}, but only {len(selected_servers)} are available."
+            )
+            selected_servers.extend(
+                selected_servers[-1] for _ in range(n_servers - len(selected_servers))
+            )
+
         return selected_servers
+
 
 class HostEstimator:
     def __init__(self, host: str, window_size: int = 20):
@@ -139,16 +147,19 @@ class MarginalCostPolicy(LoadBalancingPolicy):
         if not stats:
             return []
 
-            
         # logger.info("All stats in dict: " + ", ".join([f"{h} (util={s.util:.1f}%, power={s.power:.1f}W)" for h, s in stats.items()]))
 
-        available_hosts = [
-            host for host, stat in stats.items() if stat.util < 95
-        ]
-        
+        # available_hosts = [
+        #     host for host, stat in stats.items() if stat.util < 95
+        # ]
+        available_hosts = [host for host, stat in stats.items()]
+
         # logger.info("Available hosts for evaluation: " + ", ".join(available_hosts))
 
+        raw_total_utilization = 0.0
+
         for host in available_hosts:
+            raw_total_utilization += stats[host].util
             estimator = self.estimators.get(host)
             if estimator is None or estimator.sample_count < self.bootstrap_samples:
                 logger.info(
@@ -156,32 +167,65 @@ class MarginalCostPolicy(LoadBalancingPolicy):
                 )
                 return [host] * n_servers
 
-        # # 2. Continuous Exploration (Epsilon-Greedy)
-        # if random.random() < self.epsilon:
-        #     explored_host = random.choice(available_hosts)
-        #     logger.info(f"MarginalCost | Exploration Roll: Randomly picking {explored_host}")
-        #     return [explored_host] * n_servers
+        average_cluster_utilizaton = (
+            raw_total_utilization / len(available_hosts) / 100
+            if available_hosts
+            else 0.0
+        )
 
         marginal_costs = []
+        total_weights = 0.0
         for host in available_hosts:
             estimator = self.estimators[host]
             cost = estimator.get_marginal_cost()
-            marginal_costs.append((host, cost))
+            efficiency_score = 1 / cost if cost > 0 else 1
+            host_utilization = max(0.0, min(1.0, stats[host].util / 100))
+            weight = efficiency_score * pow(
+                1 - host_utilization, average_cluster_utilizaton
+            )
+            total_weights += weight
+            marginal_costs.append((host, cost, weight))
 
         # Sort ascending by marginal cost to find the lowest power penalty
         marginal_costs.sort(key=lambda x: x[1])
         logger.info(
-            f"MarginalCost | Exploitation | Costs: {[f'{h} (dP/dU={c:.4f})' for h, c in marginal_costs]}"
+            f"MarginalCost | Exploitation | Costs And Weights: {[f'{h} (cost={c:.4f}, weight={w:.4f})' for h, c, w in marginal_costs]}"
         )
 
-        selected_servers = [h for h, c in marginal_costs[:n_servers]]
+        if (
+            total_weights == 0
+        ):  ## If all costs are zero, fall back to round-robin among available hosts
+            return [available_hosts[i % len(available_hosts)] for i in range(n_servers)]
 
-        if len(selected_servers) < n_servers:
-            selected_servers.extend(
-                [selected_servers[-1]] * (n_servers - len(selected_servers))
+        selected_servers = []
+        remainders = []
+        for host, cost, weight in marginal_costs:
+            exact_share = weight / total_weights * n_servers
+            allocated = int(exact_share)
+            selected_servers.extend([host] * allocated)
+            remainders.append((host, exact_share - allocated))
+
+        remainders.sort(key=lambda x: x[1], reverse=True)
+        for host, _ in remainders:
+            if len(selected_servers) >= n_servers:
+                break
+            selected_servers.append(host)
+
+        while len(selected_servers) < n_servers:
+            selected_servers.append(
+                available_hosts[len(selected_servers) % len(available_hosts)]
             )
 
+        logger.info(
+            f"MarginalCost | Final Selection: {selected_servers} (Total Weights: {total_weights:.4f})"
+        )
+
         return selected_servers
+
+
+PULLS_BEFORE_EXPLORATION = (
+    5  # Number of times to pull a host before considering it "explored" in MAB
+)
 
 
 class MabPolicy:
@@ -262,7 +306,7 @@ class MabPolicy:
         logger.info(
             f"MAB Evaluation | UCB Scores: {[f'{h} (UCB={s:.4f}, Pulls={c})' for h, s, c in ucb_scores]}"
         )
-        ordered_hosts = [x[0] for x in ucb_scores[:n_servers]]
+        ordered_hosts = [x[0] for x in ucb_scores[:1]]
 
         explored_first_host = (
             ordered_hosts[0] and ordered_hosts[0] in self.mab_explored[bucket]
@@ -276,6 +320,14 @@ class MabPolicy:
                 logger.info(f"MAB Update | Incrementing count for {first_host}")
                 self.mab_counts[first_host][bucket] += 1
                 self.mab_total_pulls += 1
+
+        if len(ordered_hosts) < n_servers:
+            logger.warning(
+                f"Not enough hosts with valid UCB scores. Needed {n_servers}, but only {len(ordered_hosts)} are available. Filling remaining slots with copies of the most promising host."
+            )
+            ordered_hosts.extend(
+                ordered_hosts[0] for _ in range(n_servers - len(ordered_hosts))
+            )
 
         logger.debug(f"MAB Algorithm Evaluated Priority: {ordered_hosts}")
         return ordered_hosts
@@ -472,7 +524,7 @@ class MyLBController:
 
                 # Periodic evaluation happens silently
                 ordered_hosts = self.policy.evaluate(
-                    self.server_stats, stat.util, n_servers=1
+                    self.server_stats, stat.util, n_servers=NUMBER_SWITCH_TABLE_ENTRIES
                 )
 
                 if ordered_hosts:
@@ -491,17 +543,23 @@ class MyLBController:
 
 
 if __name__ == "__main__":
-    if PERFORMANCE_POLICY:
-        active_policy = PerformanceOnlyPolicy()
-        logger.info(
-            "Starting Load Balancer Controller. Using Performance-Only Priority"
-        )
-    else:
-        # active_policy = MabPolicy()
-        active_policy = MarginalCostPolicy()
-        logger.info(
-            "Starting Load Balancer Controller. Using Marginal-cost Energy-Aware Priority"
-        )
+    ### To switch to Least-Utilized, just comment out the following two lines and uncomment the above:
+    # active_policy = LeastUtilizedPolicy()
+    # logger.info(
+    #     "Starting Load Balancer Controller. Using Least-Utilized Energy-Aware Priority"
+    # )
+
+    ### To switch to Marginal Cost, just comment out the above two lines and uncomment the following:
+    active_policy = MarginalCostPolicy()
+    logger.info(
+        "Starting Load Balancer Controller. Using Marginal-cost Energy-Aware Priority"
+    )
+
+    ### To switch to MAB, just comment out the above two lines and uncomment the following:
+    # active_policy = MabPolicy()
+    # logger.info(
+    #         "Starting Load Balancer Controller. Using MAB Energy-Aware Priority"
+    #     )
 
     ctrl = MyLBController(
         policy=active_policy, program_name="load_balance", grpc_addr="127.0.0.1:50052"
