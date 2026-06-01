@@ -59,6 +59,14 @@ class LoadBalancingPolicy(ABC):
     ) -> List[str]:
         pass
 
+class RoundRobinPolicy(LoadBalancingPolicy):
+    def observe(self, stat: ServerStat) -> None:
+        pass
+    
+    def evaluate(
+        self, stats: Dict[str, ServerStat], util: float, n_servers: int) -> List[str]:
+        hosts = list(stats.keys())
+        return [hosts[i % len(hosts)] for i in range(n_servers)] 
 
 class LeastUtilizedPolicy:
     def observe(self, stat: ServerStat) -> None:
@@ -554,7 +562,12 @@ if __name__ == "__main__":
     logger.info(
         "Starting Load Balancer Controller. Using Marginal-cost Energy-Aware Priority"
     )
-
+    
+    # active_policy = RoundRobinPolicy()
+    # logger.info(
+    #     "Starting Load Balancer Controller. Using Round-Robin Priority."
+    # )
+    
     ### To switch to MAB, just comment out the above two lines and uncomment the following:
     # active_policy = MabPolicy()
     # logger.info(
