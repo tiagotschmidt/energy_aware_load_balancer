@@ -121,7 +121,10 @@ class HostEstimator:
 
         denominator = (n * sum_xx) - (sum_x * sum_x)
         if denominator == 0:
-            return 0.0  # Avoid division by zero if util is completely static
+            avg_util = sum_x / n
+            avg_power = sum_y / n
+            return avg_power / avg_util if avg_util > 0 else 1.0
+            # return 0.0  # Avoid division by zero if util is completely static
 
         slope = ((n * sum_xy) - (sum_x * sum_y)) / denominator
         # Marginal cost for power should logically not be negative in our range.
