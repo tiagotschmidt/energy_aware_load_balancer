@@ -133,12 +133,13 @@ class HostEstimator:
 
 class MarginalCostPolicy(LoadBalancingPolicy):
     def __init__(
-        self, bootstrap_samples: int = 5, epsilon: float = 0.05, window_size: int = 20
+        self, bootstrap_samples: int = 5, epsilon: float = 0.05, window_size: int = 20, aggressive_factor: float = 0
     ):
         self.estimators: Dict[str, HostEstimator] = {}
         self.bootstrap_samples = bootstrap_samples
         # self.epsilon = epsilon
         self.window_size = window_size
+        self.aggressive_factor = aggressive_factor
 
     def observe(self, stat: ServerStat) -> None:
         if stat.host not in self.estimators:
@@ -184,17 +185,28 @@ class MarginalCostPolicy(LoadBalancingPolicy):
             else 0.0
         )
 
+        min_cost = min(self.estimators[h].get_marginal_cost() for h in available_hosts)
+
         marginal_costs = []
         total_weights = 0.0
         for host in available_hosts:
             estimator = self.estimators[host]
             cost = estimator.get_marginal_cost()
+
             EPSILON = 1e-6
             efficiency_score = 1 / (cost + EPSILON)
+
             host_utilization = max(0.0, min(1.0, stats[host].util / 100))
+
+            penalty_factor = max(0.001, 1 - host_utilization)
+
             weight = efficiency_score * pow(
-                1 - host_utilization, average_cluster_utilizaton
+                penalty_factor, average_cluster_utilizaton
             )
+
+            if cost == min_cost:
+                weight *= pow(10, self.aggressive_factor * 4)
+            
             total_weights += weight
             marginal_costs.append((host, cost, weight))
 
@@ -562,9 +574,10 @@ if __name__ == "__main__":
     # )
 
     ### To switch to Marginal Cost, just comment out the above two lines and uncomment the following:
-    active_policy = MarginalCostPolicy()
+    factor = 0.0
+    active_policy = MarginalCostPolicy(aggressive_factor=factor)
     logger.info(
-        "Starting Load Balancer Controller. Using Marginal-cost Energy-Aware Priority"
+        f"Starting Load Balancer Controller. Using Marginal-cost Energy-Aware Priority. Aggressiveness Factor: {factor}"
     )
     
     # active_policy = RoundRobinPolicy()
