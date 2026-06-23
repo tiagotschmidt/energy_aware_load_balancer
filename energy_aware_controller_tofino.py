@@ -198,12 +198,19 @@ class MarginalCostPolicy(LoadBalancingPolicy):
 
             EPSILON = 1e-6
             efficiency_score = 1 / (cost + EPSILON)
+            efficiency_score = (
+                efficiency_score * efficiency_score
+            )  # Square to emphasize efficiency differences
 
             host_utilization = max(0.0, min(1.0, stats[host].util / 100))
 
-            penalty_factor = max(0.001, 1 - host_utilization)
-
-            weight = efficiency_score * pow(penalty_factor, average_cluster_utilizaton)
+            if host_utilization > 0.85:
+                penalty_factor = max(0.001, 1 - host_utilization)
+                weight = efficiency_score * pow(
+                    penalty_factor, average_cluster_utilizaton
+                )
+            else:
+                weight = efficiency_score
 
             total_weights += weight
             marginal_costs.append((host, cost, weight))
