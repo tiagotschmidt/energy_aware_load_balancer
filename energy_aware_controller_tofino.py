@@ -138,12 +138,11 @@ class MarginalCostPolicy(LoadBalancingPolicy):
     def __init__(
         self,
         bootstrap_samples: int = 5,
-        epsilon: float = 0.05,
         window_size: int = 20,
     ):
         self.estimators: Dict[str, HostEstimator] = {}
+        self.smoothed_weights: Dict[str, float] = {}  
         self.bootstrap_samples = bootstrap_samples
-        # self.epsilon = epsilon
         self.window_size = window_size
 
     def observe(self, stat: ServerStat) -> None:
@@ -164,19 +163,9 @@ class MarginalCostPolicy(LoadBalancingPolicy):
         if not stats:
             return []
 
-        # logger.info("All stats in dict: " + ", ".join([f"{h} (util={s.util:.1f}%, power={s.power:.1f}W)" for h, s in stats.items()]))
-
-        # available_hosts = [
-        #     host for host, stat in stats.items() if stat.util < 95
-        # ]
         available_hosts = [host for host, stat in stats.items()]
 
-        # logger.info("Available hosts for evaluation: " + ", ".join(available_hosts))
-
-        raw_total_utilization = 0.0
-
         for host in available_hosts:
-            raw_total_utilization += stats[host].util
             estimator = self.estimators.get(host)
             if estimator is None or estimator.sample_count < self.bootstrap_samples:
                 logger.info(
@@ -184,36 +173,35 @@ class MarginalCostPolicy(LoadBalancingPolicy):
                 )
                 return [host] * n_servers
 
-        average_cluster_utilizaton = (
-            raw_total_utilization / len(available_hosts) / 100
-            if available_hosts
-            else 0.0
-        )
-
         marginal_costs = []
         total_weights = 0.0
+        
         for host in available_hosts:
             estimator = self.estimators[host]
             cost = estimator.get_marginal_cost()
 
             EPSILON = 1e-6
             efficiency_score = 1 / (cost + EPSILON)
-            efficiency_score = (
-                efficiency_score * efficiency_score
-            )  # Square to emphasize efficiency differences
 
             host_utilization = max(0.0, min(1.0, stats[host].util / 100))
 
             if host_utilization > 0.85:
-                penalty_factor = max(0.001, 1 - host_utilization)
-                weight = efficiency_score * pow(
-                    penalty_factor, average_cluster_utilizaton
-                )
+                overload = host_utilization - 0.85
+                penalty_factor = max(0.5, 1.0 - (overload * 5))
             else:
-                weight = efficiency_score
+                penalty_factor = 1.0
 
-            total_weights += weight
-            marginal_costs.append((host, cost, weight))
+            raw_weight = efficiency_score * penalty_factor
+
+            prev_weight = self.smoothed_weights.get(host, raw_weight)
+            # Decay slowly (5%) if getting full, grow faster (20%) if emptying
+            ALPHA = 0.05 if raw_weight < prev_weight else 0.20
+            
+            smoothed_weight = (ALPHA * raw_weight) + ((1 - ALPHA) * prev_weight)
+            self.smoothed_weights[host] = smoothed_weight
+
+            total_weights += smoothed_weight
+            marginal_costs.append((host, cost, smoothed_weight))
 
         # Sort ascending by marginal cost to find the lowest power penalty
         marginal_costs.sort(key=lambda x: x[1])
