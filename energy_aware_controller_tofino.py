@@ -138,10 +138,9 @@ class MarginalCostPolicy(LoadBalancingPolicy):
     def __init__(
         self,
         bootstrap_samples: int = 5,
-        window_size: int = 20,
+        window_size: int = 5,
     ):
         self.estimators: Dict[str, HostEstimator] = {}
-        self.smoothed_weights: Dict[str, float] = {}  
         self.bootstrap_samples = bootstrap_samples
         self.window_size = window_size
 
@@ -165,13 +164,27 @@ class MarginalCostPolicy(LoadBalancingPolicy):
 
         available_hosts = [host for host, stat in stats.items()]
 
+        raw_total_utilization = 0.0
         for host in available_hosts:
+            raw_total_utilization += stats[host].util
             estimator = self.estimators.get(host)
             if estimator is None or estimator.sample_count < self.bootstrap_samples:
                 logger.info(
                     f"MarginalCost | Bootstrapping: Force-picking under-sampled host {host}"
                 )
                 return [host] * n_servers
+
+        average_cluster_utilization = (
+            raw_total_utilization / len(available_hosts) / 100.0
+            if available_hosts
+            else 0.0
+        )
+
+        # High Load Scenario: Round Robin & Freeze Table Updates
+        # Returning a perfectly static array prevents gRPC from triggering updates
+        if average_cluster_utilization > 0.85:
+            logger.info(f"MarginalCost | High Load Detected ({average_cluster_utilization*100:.1f}%). Freezing to Round Robin.")
+            return [available_hosts[i % len(available_hosts)] for i in range(n_servers)]
 
         marginal_costs = []
         total_weights = 0.0
@@ -181,27 +194,20 @@ class MarginalCostPolicy(LoadBalancingPolicy):
             cost = estimator.get_marginal_cost()
 
             EPSILON = 1e-6
+            # Low Load Scenario: Aggressive Energy Concentration
             efficiency_score = 1 / (cost + EPSILON)
+            efficiency_score = efficiency_score * efficiency_score  
 
             host_utilization = max(0.0, min(1.0, stats[host].util / 100))
 
-            if host_utilization > 0.85:
-                overload = host_utilization - 0.85
-                penalty_factor = max(0.5, 1.0 - (overload * 5))
-            else:
-                penalty_factor = 1.0
-
-            raw_weight = efficiency_score * penalty_factor
-
-            prev_weight = self.smoothed_weights.get(host, raw_weight)
-            # Decay slowly (5%) if getting full, grow faster (20%) if emptying
-            ALPHA = 0.05 if raw_weight < prev_weight else 0.20
+            # Medium Load Scenario: Continuous LU Penalty
+            # Minimizes servers in turbo boost by gently spreading load as utilization rises
+            lu_penalty = max(0.001, 1.0 - host_utilization)
             
-            smoothed_weight = (ALPHA * raw_weight) + ((1 - ALPHA) * prev_weight)
-            self.smoothed_weights[host] = smoothed_weight
+            weight = efficiency_score * pow(lu_penalty, 1.0 + average_cluster_utilization)
 
-            total_weights += smoothed_weight
-            marginal_costs.append((host, cost, smoothed_weight))
+            total_weights += weight
+            marginal_costs.append((host, cost, weight))
 
         # Sort ascending by marginal cost to find the lowest power penalty
         marginal_costs.sort(key=lambda x: x[1])
@@ -209,9 +215,7 @@ class MarginalCostPolicy(LoadBalancingPolicy):
             f"MarginalCost | Exploitation | Costs And Weights: {[f'{h} (cost={c:.4f}, weight={w:.4f})' for h, c, w in marginal_costs]}"
         )
 
-        if (
-            total_weights == 0
-        ):  ## If all costs are zero, fall back to round-robin among available hosts
+        if total_weights == 0:  
             return [available_hosts[i % len(available_hosts)] for i in range(n_servers)]
 
         selected_servers = []
