@@ -216,6 +216,9 @@ class MarginalCostPolicy(LoadBalancingPolicy):
             # Medium Load Scenario: Continuous LU Penalty
             # Minimizes servers in turbo boost by gently spreading load as utilization rises
             lu_penalty = max(0.001, 1.0 - host_utilization)
+            # The penalty is squared to make it more aggressive as utilization approaches 100%
+            # This compensates for the fact that the efficiency score is squared, ensuring that high-utilization servers are penalized more heavily.
+            lu_penalty = lu_penalty * lu_penalty
 
             weight = efficiency_score * pow(
                 lu_penalty, 1.0 + average_cluster_utilization
