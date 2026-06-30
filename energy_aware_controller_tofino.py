@@ -117,11 +117,13 @@ class HostEstimator:
     def get_marginal_cost(self) -> float:
         """
         Calculates dP/dU using OLS linear regression over the sliding window.
-        Returns the slope (watts per 1% utilization increase).
+        Returns the slope (watts per 1% utilization increase), bounded to physical realities.
         """
         n = len(self.history)
+
+        # Fallback for insufficient data
         if n < 2:
-            return 0.0
+            return 1.0
 
         sum_x = sum(u for u, p in self.history)
         sum_y = sum(p for u, p in self.history)
@@ -129,20 +131,21 @@ class HostEstimator:
         sum_xy = sum(u * p for u, p in self.history)
 
         denominator = (n * sum_xx) - (sum_x * sum_x)
+
+        # If utilization is completely flat, variance is 0.
+        # Use a safe physical baseline rather than an explosive average.
         if denominator == 0:
-            average_cost = self.get_average_cost(sum_x, n, sum_y)
-            return average_cost
-            # return 0.0  # Avoid division by zero if util is completely static
+            return 1.0
 
         slope = ((n * sum_xy) - (sum_x * sum_y)) / denominator
-        # Marginal cost for power should logically not be negative in our range.
+
+        # If the slope goes negative due to hardware polling noise,
+        # use the safe physical baseline.
         if slope <= 0:
-            logger.warning(
-                f"Host {self.host} | Non-positive slope detected ({slope:.4f}). Using average cost instead."
-            )
-            average_cost = self.get_average_cost(sum_x, n, sum_y)
-            return average_cost
-        return max(0.0, slope)
+            return 1.0
+
+        # Physical Limits & Singularity Protection
+        return min(max(slope, 0.1), 15.0)
 
 
 class MarginalCostPolicy(LoadBalancingPolicy):
