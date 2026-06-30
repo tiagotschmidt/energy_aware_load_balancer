@@ -108,6 +108,12 @@ class HostEstimator:
     def sample_count(self) -> int:
         return len(self.history)
 
+    def get_average_cost(self, sum_x, n, sum_y):
+        avg_util = sum_x / n
+        avg_power = sum_y / n
+        average_cost = avg_power / avg_util if avg_util > 0 else 1.0
+        return average_cost
+
     def get_marginal_cost(self) -> float:
         """
         Calculates dP/dU using OLS linear regression over the sliding window.
@@ -124,13 +130,18 @@ class HostEstimator:
 
         denominator = (n * sum_xx) - (sum_x * sum_x)
         if denominator == 0:
-            avg_util = sum_x / n
-            avg_power = sum_y / n
-            return avg_power / avg_util if avg_util > 0 else 1.0
+            average_cost = self.get_average_cost(sum_x, n, sum_y)
+            return average_cost
             # return 0.0  # Avoid division by zero if util is completely static
 
         slope = ((n * sum_xy) - (sum_x * sum_y)) / denominator
         # Marginal cost for power should logically not be negative in our range.
+        if slope <= 0:
+            logger.warning(
+                f"Host {self.host} | Non-positive slope detected ({slope:.4f}). Using average cost instead."
+            )
+            average_cost = self.get_average_cost(sum_x, n, sum_y)
+            return average_cost
         return max(0.0, slope)
 
 
@@ -183,12 +194,14 @@ class MarginalCostPolicy(LoadBalancingPolicy):
         # High Load Scenario: Round Robin & Freeze Table Updates
         # Returning a perfectly static array prevents gRPC from triggering updates
         if average_cluster_utilization > 0.85:
-            logger.info(f"MarginalCost | High Load Detected ({average_cluster_utilization*100:.1f}%). Freezing to Round Robin.")
+            logger.info(
+                f"MarginalCost | High Load Detected ({average_cluster_utilization * 100:.1f}%). Freezing to Round Robin."
+            )
             return [available_hosts[i % len(available_hosts)] for i in range(n_servers)]
 
         marginal_costs = []
         total_weights = 0.0
-        
+
         for host in available_hosts:
             estimator = self.estimators[host]
             cost = estimator.get_marginal_cost()
@@ -196,15 +209,17 @@ class MarginalCostPolicy(LoadBalancingPolicy):
             EPSILON = 1e-6
             # Low Load Scenario: Aggressive Energy Concentration
             efficiency_score = 1 / (cost + EPSILON)
-            efficiency_score = efficiency_score * efficiency_score  
+            efficiency_score = efficiency_score * efficiency_score
 
             host_utilization = max(0.0, min(1.0, stats[host].util / 100))
 
             # Medium Load Scenario: Continuous LU Penalty
             # Minimizes servers in turbo boost by gently spreading load as utilization rises
             lu_penalty = max(0.001, 1.0 - host_utilization)
-            
-            weight = efficiency_score * pow(lu_penalty, 1.0 + average_cluster_utilization)
+
+            weight = efficiency_score * pow(
+                lu_penalty, 1.0 + average_cluster_utilization
+            )
 
             total_weights += weight
             marginal_costs.append((host, cost, weight))
@@ -215,7 +230,7 @@ class MarginalCostPolicy(LoadBalancingPolicy):
             f"MarginalCost | Exploitation | Costs And Weights: {[f'{h} (cost={c:.4f}, weight={w:.4f})' for h, c, w in marginal_costs]}"
         )
 
-        if total_weights == 0:  
+        if total_weights == 0:
             return [available_hosts[i % len(available_hosts)] for i in range(n_servers)]
 
         selected_servers = []
