@@ -4,7 +4,6 @@ import sys
 
 # Path to the shared folder visible to the VM
 # UPDATE THIS PATH to match your actual shared folder location
-SHARED_FILE_PATH = "/home/ximit/Documents/energy_aware_load_balancer/rapl/rapl_value.txt"
 
 def main():
     print(f"--- Starting RAPL Bridge ---")
