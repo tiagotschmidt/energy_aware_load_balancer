@@ -1,0 +1,193 @@
+# proto-file: p4/config/v1/p4info.proto
+# proto-message: p4.config.v1.P4Info
+
+pkg_info {
+  arch: "v1model"
+}
+tables {
+  preamble {
+    id: 42718419
+    name: "MyIngress.ecmp_nhop"
+    alias: "ecmp_nhop"
+  }
+  match_fields {
+    id: 1
+    name: "meta.ecmp_select"
+    bitwidth: 16
+    match_type: EXACT
+  }
+  action_refs {
+    id: 23809882
+  }
+  action_refs {
+    id: 25652968
+  }
+  action_refs {
+    id: 21257015
+    annotations: "@defaultonly"
+    scope: DEFAULT_ONLY
+  }
+  initial_default_action {
+    action_id: 21257015
+  }
+  size: 64
+}
+tables {
+  preamble {
+    id: 33694045
+    name: "MyIngress.server_src_nat"
+    alias: "server_src_nat"
+  }
+  match_fields {
+    id: 1
+    name: "hdr.ipv4.srcAddr"
+    bitwidth: 32
+    match_type: EXACT
+  }
+  match_fields {
+    id: 2
+    name: "hdr.ipv4.dstAddr"
+    bitwidth: 32
+    match_type: EXACT
+  }
+  action_refs {
+    id: 25326083
+  }
+  action_refs {
+    id: 25652968
+  }
+  action_refs {
+    id: 21257015
+    annotations: "@defaultonly"
+    scope: DEFAULT_ONLY
+  }
+  initial_default_action {
+    action_id: 21257015
+  }
+  size: 1024
+}
+tables {
+  preamble {
+    id: 49202009
+    name: "MyEgress.send_frame"
+    alias: "send_frame"
+  }
+  match_fields {
+    id: 1
+    name: "standard_metadata.egress_port"
+    bitwidth: 9
+    match_type: EXACT
+  }
+  action_refs {
+    id: 22398708
+  }
+  action_refs {
+    id: 20880156
+  }
+  action_refs {
+    id: 21257015
+    annotations: "@defaultonly"
+    scope: DEFAULT_ONLY
+  }
+  initial_default_action {
+    action_id: 21257015
+  }
+  size: 256
+}
+actions {
+  preamble {
+    id: 21257015
+    name: "NoAction"
+    alias: "NoAction"
+    annotations: "@noWarn(\"unused\")"
+  }
+}
+actions {
+  preamble {
+    id: 25652968
+    name: "MyIngress.drop"
+    alias: "MyIngress.drop"
+  }
+}
+actions {
+  preamble {
+    id: 23809882
+    name: "MyIngress.forward_to_server"
+    alias: "forward_to_server"
+  }
+  params {
+    id: 1
+    name: "server_mac"
+    bitwidth: 48
+  }
+  params {
+    id: 2
+    name: "server_ip"
+    bitwidth: 32
+  }
+  params {
+    id: 3
+    name: "port"
+    bitwidth: 16
+  }
+}
+actions {
+  preamble {
+    id: 24963731
+    name: "MyIngress.select_new_server"
+    alias: "select_new_server"
+  }
+}
+actions {
+  preamble {
+    id: 25326083
+    name: "MyIngress.nat_reply_to_client"
+    alias: "nat_reply_to_client"
+  }
+  params {
+    id: 1
+    name: "client_mac"
+    bitwidth: 48
+  }
+  params {
+    id: 2
+    name: "port"
+    bitwidth: 9
+  }
+}
+actions {
+  preamble {
+    id: 22398708
+    name: "MyEgress.rewrite_mac"
+    alias: "rewrite_mac"
+  }
+  params {
+    id: 1
+    name: "smac"
+    bitwidth: 48
+  }
+}
+actions {
+  preamble {
+    id: 20880156
+    name: "MyEgress.drop"
+    alias: "MyEgress.drop"
+  }
+}
+registers {
+  preamble {
+    id: 379304085
+    name: "MyIngress.rr_counter"
+    alias: "rr_counter"
+  }
+  type_spec {
+    bitstring {
+      bit {
+        bitwidth: 32
+      }
+    }
+  }
+  size: 1
+}
+type_info {
+}

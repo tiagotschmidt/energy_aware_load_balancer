@@ -100,38 +100,20 @@ parser MyParser(packet_in packet,
         packet.extract(hdr.ethernet);
         transition select(hdr.ethernet.etherType) {
             0x0800: parse_ipv4;
-            0x0806: parse_arp;
             default: accept;
         }
-    }
-
-    state parse_arp {
-        packet.extract(hdr.arp);
-        transition accept;
     }
 
     state parse_ipv4 {
         packet.extract(hdr.ipv4);
         transition select(hdr.ipv4.protocol) {
-            6: parse_tcp;
             17: parse_udp;
-            1: parse_icmp;
             default: accept;
         }
     }
 
-    state parse_tcp {
-        packet.extract(hdr.tcp);
-        transition accept;
-    }
-
     state parse_udp {
         packet.extract(hdr.udp);
-        transition accept;
-    }
-
-    state parse_icmp {
-        packet.extract(hdr.icmp);
         transition accept;
     }
 }
@@ -161,9 +143,7 @@ control MyIngress(inout headers hdr,
                   inout metadata meta,
                   inout standard_metadata_t standard_metadata) {
 
-    // --- CONNECTION CONSISTENCY REGISTERS ---
-    // register<bit<1>>(16384) flow_bloom_filter; 
-    // register<bit<14>>(16384) flow_server_map;
+    const bit<32> POOL_SIZE = 20;
     register<bit<32>>(1) rr_counter;
 
     action drop() {
@@ -171,7 +151,6 @@ control MyIngress(inout headers hdr,
     }
 
     // --- FORWARD PATH ACTION (Client -> Server) ---
-    // Combines DNAT + Routing + MAC Rewrite in one step
     action forward_to_server(bit<48> server_mac, bit<32> server_ip, bit<16> port) {
         hdr.ethernet.dstAddr = server_mac;
         hdr.ipv4.dstAddr = server_ip;
@@ -179,12 +158,17 @@ control MyIngress(inout headers hdr,
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
     }
 
-    action select_new_server(bit<32> max_servers) {
+    action select_new_server() {
         bit<32> current_idx;
         rr_counter.read(current_idx, 0);
         meta.ecmp_select = (bit<16>)current_idx;
-        bit<32> next_idx = (current_idx + 1) % max_servers;
-        rr_counter.write(0, next_idx);
+        
+        // Replaced modulo with Tofino's explicit if/else wrap-around
+        if (current_idx == POOL_SIZE - 1) {
+            rr_counter.write(0, 0);
+        } else {
+            rr_counter.write(0, current_idx + 1);
+        }
     }
 
     table ecmp_nhop {
@@ -194,9 +178,8 @@ control MyIngress(inout headers hdr,
     }
 
     // --- REVERSE PATH ACTION (Server -> Client) ---
-    // Combines SNAT + Routing + MAC Rewrite in one step
     action nat_reply_to_client(bit<48> client_mac, bit<9> port) {
-        hdr.ipv4.srcAddr = VIP_ADDRESS; // Hide Server IP (SNAT)
+        hdr.ipv4.srcAddr = VIP_ADDRESS; 
         hdr.ethernet.dstAddr = client_mac;
         standard_metadata.egress_spec = (bit<9>)port;
         hdr.ipv4.ttl = hdr.ipv4.ttl - 1;
@@ -204,9 +187,8 @@ control MyIngress(inout headers hdr,
 
     table server_src_nat {
         key = {
-            // FIXED TABLE STRATEGY: 
-            hdr.ipv4.srcAddr: exact; // Source is Server (e.g. 10.0.2.2)
-            hdr.ipv4.dstAddr: exact; // Dest is Client (e.g. 10.0.1.1)
+            hdr.ipv4.srcAddr: exact; 
+            hdr.ipv4.dstAddr: exact; 
         }
         actions = {
             nat_reply_to_client;
@@ -218,43 +200,17 @@ control MyIngress(inout headers hdr,
     apply {
         if (hdr.ipv4.isValid()) {
             
-            // Disable UDP Checksum since we are NATing
             if (hdr.udp.isValid()) {
                 hdr.udp.checksum = 16w0;
             }
 
             // PATH 1: Client -> VIP (Load Balancer)
             if (hdr.ipv4.dstAddr == VIP_ADDRESS && hdr.ipv4.ttl > 0) {
-                 
-                 bit<32> hash_index;
-                 // 5-tuple Hash using 0 for missing headers
-                 hash(hash_index, HashAlgorithm.crc16, (bit<32>)0, {
-                    hdr.ipv4.srcAddr,
-                    hdr.ipv4.dstAddr,
-                    hdr.ipv4.protocol,
-                    hdr.tcp.srcPort, 
-                    hdr.tcp.dstPort,
-                    hdr.udp.srcPort, 
-                    hdr.udp.dstPort
-                 }, (bit<32>)16384);
-
-                //  bit<1> is_known_flow;
-                //  flow_bloom_filter.read(is_known_flow, hash_index);
-
-                //  if (is_known_flow == 1) {
-                //      // Sticky Session
-                //      flow_server_map.read(meta.ecmp_select, hash_index);
-                //  } else {
-                //     //  New Session
-                 select_new_server(2); 
-                //      flow_bloom_filter.write(hash_index, 1);
-                //      flow_server_map.write(hash_index, meta.ecmp_select);
-                // //  }
+                 select_new_server(); 
                  ecmp_nhop.apply();
             }
 
             // PATH 2: Server -> Client (Reverse NAT)
-            // Matches explicit Source(Server) and Destination(Client)
             else {
                 server_src_nat.apply();
             }
@@ -311,11 +267,8 @@ control MyComputeChecksum(inout headers hdr, inout metadata meta) {
 control MyDeparser(packet_out packet, in headers hdr) {
     apply {
         packet.emit(hdr.ethernet);
-        packet.emit(hdr.arp);
         packet.emit(hdr.ipv4);
-        packet.emit(hdr.tcp);
         packet.emit(hdr.udp);
-        packet.emit(hdr.icmp);
     }
 }
 
