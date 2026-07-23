@@ -64,8 +64,14 @@ class ScalableSimTopo(Topo):
         )
 
         for i in range(1, num_hosts + 1):
+            if i == 1:
+                # Client gets a distinct IP to avoid VIP conflict
+                host_ip = "10.0.0.100/24"
+            else:
+                host_ip = f"10.0.0.{i}/24"
+
             host = self.addHost(
-                f"h{i}", cls=P4Host, ip=f"10.0.0.{i}/24", mac=f"00:00:00:00:00:0{i}"
+                f"h{i}", cls=P4Host, ip=host_ip, mac=f"00:00:00:00:00:0{i}"
             )
             self.addLink(host, switch)
 
@@ -79,10 +85,14 @@ def run_simulation(num_hosts):
 
     print(f"--- Environment instantiated with {num_hosts} heterogeneous hosts ---")
 
-    for i in range(1, num_hosts + 1):
+    h1 = net.get("h1")
+    h1.cmd("arp -s 10.0.0.1 08:00:00:00:01:00")
+
+    for i in range(2, num_hosts + 1):
         host = net.get(f"h{i}")
 
         print(f"Starting Sift and Sim Agent on {host.name}...")
+        host.cmd("arp -s 10.0.0.100 00:00:00:00:00:01")
 
         # Execute Sift server using uv
         host.cmd(

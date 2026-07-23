@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -15,7 +16,8 @@ import (
 
 const LOG_DIR = "logs"
 const DATA_FILE = "sift_data/dataset.npy"
-const MAX_VECTORS = 100000
+
+const MAX_VECTORS = 100
 
 var (
 	port = kingpin.Flag("port", "Port to listen on").Default("8080").String()
@@ -41,6 +43,12 @@ func vectorSearch(query []float32, database []float32) int {
 			if sqDist > minDist {
 				break
 			}
+		}
+
+		// Simulate CPU consumption by adding a loop that sums a number for 1000 times
+		var dummySum float32 = 0.0
+		for k := 0; k < 1000; k++ {
+			dummySum += 1.0
 		}
 
 		if sqDist < minDist {
@@ -128,13 +136,18 @@ func handle_request(databaseVectors []float32, socket *net.UDPConn, address *net
 
 func loadDatabase(filename string) ([]float32, error) {
 	var returnDatabase []float32
-	f, err := os.Open(filename)
+
+	// 1. Read the entire file into RAM in one system call
+	fileBytes, err := os.ReadFile(filename)
 	if err != nil {
 		return returnDatabase, err
 	}
-	defer f.Close()
 
-	err = npyio.Read(f, &returnDatabase)
+	// 2. Create an in-memory reader
+	memoryReader := bytes.NewReader(fileBytes)
+
+	// 3. npyio parses from RAM instantly
+	err = npyio.Read(memoryReader, &returnDatabase)
 	return returnDatabase, err
 }
 
