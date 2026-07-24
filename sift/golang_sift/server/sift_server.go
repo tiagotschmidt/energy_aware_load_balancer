@@ -16,8 +16,7 @@ import (
 
 const LOG_DIR = "logs"
 const DATA_FILE = "sift_data/dataset.npy"
-
-const MAX_VECTORS = 100
+const MAX_VECTORS = 100000
 
 var (
 	port = kingpin.Flag("port", "Port to listen on").Default("8080").String()
@@ -43,12 +42,6 @@ func vectorSearch(query []float32, database []float32) int {
 			if sqDist > minDist {
 				break
 			}
-		}
-
-		// Simulate CPU consumption by adding a loop that sums a number for 1000 times
-		var dummySum float32 = 0.0
-		for k := 0; k < 1000; k++ {
-			dummySum += 1.0
 		}
 
 		if sqDist < minDist {
