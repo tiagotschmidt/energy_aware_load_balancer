@@ -71,7 +71,7 @@ class ScalableSimTopo(Topo):
                 host_ip = f"10.0.0.{i}/24"
 
             host = self.addHost(
-                f"h{i}", cls=P4Host, ip=host_ip, mac=f"00:00:00:00:00:0{i}"
+                f"h{i}", cls=P4Host, ip=host_ip, mac=f"00:00:00:00:00:{i:02x}"
             )
             self.addLink(host, switch)
 
@@ -92,6 +92,7 @@ def run_simulation(num_hosts):
         host = net.get(f"h{i}")
 
         print(f"Starting Sift and Sim Agent on {host.name}...")
+
         host.cmd("arp -s 10.0.0.100 00:00:00:00:00:01")
 
         # Execute Sift server using uv
@@ -101,7 +102,7 @@ def run_simulation(num_hosts):
 
         # Execute Simulated Agent using uv
         host.cmd(
-            f"python3 simulation/server_agent/sim_server_agent.py {host.name} --controller-ip 10.0.0.254 > /tmp/{host.name}_agent.log 2>&1 &"
+            f"python3 simulation/server_agent/sim_server_agent.py {host.name} --controller-ip 10.0.0.100 > /tmp/{host.name}_agent.log 2>&1 &"
         )
 
     CLI(net)
