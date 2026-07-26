@@ -52,4 +52,12 @@ if __name__ == "__main__":
     # Save as standard .npy for faster loading in experiment
     np.save(f"{DATA_DIR}/dataset.npy", base)
     np.save(f"{DATA_DIR}/queries.npy", query)
-    print("--- Converted to .npy for speed ---")
+    print("--- Converted to full .npy for speed ---")
+
+    # --- NEW: Generate lightweight slices for fast multi-server simulation ---
+    base_1k = base[:1000]
+    base_10k = base[:10000]
+    
+    np.save(f"{DATA_DIR}/dataset_1k.npy", base_1k)
+    np.save(f"{DATA_DIR}/dataset_10k.npy", base_10k)
+    print("--- Generated lightweight subsets: dataset_1k.npy and dataset_10k.npy ---")
