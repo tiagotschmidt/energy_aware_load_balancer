@@ -348,7 +348,7 @@ class MyLBController:
     def install_egress_rewrite_rules(self):
         print(f"Installing Egress Rewrite Rules for {self.num_hosts} hosts...")
         for port in range(1, self.num_hosts + 1):
-            smac = f"00:00:00:00:00:0{port}"
+            smac = f"00:00:00:00:00:{port:02x}"
             entry = self.p4info_helper.buildTableEntry(
                 table_name="MyEgress.send_frame",
                 match_fields={"standard_metadata.egress_port": port},
@@ -386,7 +386,7 @@ class MyLBController:
 
     def update_switch_tables(self, priority_hosts: List[str]):
         server_info = {
-            f"h{i}": {"ip": f"10.0.0.{i}", "mac": f"00:00:00:00:00:0{i}", "port": i}
+            f"h{i}": {"ip": f"10.0.0.{i}", "mac": f"00:00:00:00:00:{i:02x}", "port": i}
             for i in range(2, self.num_hosts + 1)
         }
 
@@ -493,12 +493,15 @@ if __name__ == "__main__":
     # SELECT YOUR ACTIVE POLICY HERE
     # -----------------------------------------------------------------
     # active_policy = LeastUtilizedPolicy()
-    # active_policy = RoundRobinPolicy()
+    active_policy = RoundRobinPolicy()
+    print(
+        f"Starting Load Balancer Controller for {args.hosts} hosts. Using Round-Robin Priority."
+    )
     # active_policy = MabPolicy()
 
-    active_policy = MarginalCostPolicy()
-    print(
-        f"Starting Load Balancer Controller for {args.hosts} hosts. Using Marginal-cost Energy-Aware Priority."
-    )
+    #active_policy = MarginalCostPolicy()
+    #print(
+    #    f"Starting Load Balancer Controller for {args.hosts} hosts. Using Marginal-cost Energy-Aware Priority."
+    #)
 
     ctrl = MyLBController(active_policy, P4INFO_FILE, JSON_FILE, num_hosts=args.hosts)
