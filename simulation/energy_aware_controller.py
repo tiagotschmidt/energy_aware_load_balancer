@@ -78,6 +78,9 @@ class LoadBalancingPolicy(ABC):
 
 
 class RoundRobinPolicy(LoadBalancingPolicy):
+    def __init__(self):
+        self.hosts = []  
+
     def observe(self, stat: ServerStat) -> None:
         pass
 
@@ -86,9 +89,10 @@ class RoundRobinPolicy(LoadBalancingPolicy):
     ) -> List[str]:
         if not stats:
             return []
-        hosts = list(stats.keys())
-        return [hosts[i % len(hosts)] for i in range(n_servers)]
-
+        if len(self.hosts) == 0 or len(stats) > len(self.hosts):
+            self.hosts = list(stats.keys()) 
+        
+        return [self.hosts[i % len(self.hosts)] for i in range(n_servers)]
 
 class LeastUtilizedPolicy(LoadBalancingPolicy):
     def observe(self, stat: ServerStat) -> None:
@@ -161,7 +165,8 @@ class MarginalCostPolicy(LoadBalancingPolicy):
     ) -> List[str]:
         if not stats:
             return []
-        available_hosts = [host for host, stat in stats.items()]
+        #available_hosts = [host for host, stat in stats.items()]
+        available_hosts = sorted(stats.keys())
 
         raw_total_utilization = sum(stats[host].util for host in available_hosts)
         for host in available_hosts:
@@ -492,16 +497,20 @@ if __name__ == "__main__":
     # -----------------------------------------------------------------
     # SELECT YOUR ACTIVE POLICY HERE
     # -----------------------------------------------------------------
-    # active_policy = LeastUtilizedPolicy()
-    active_policy = RoundRobinPolicy()
-    print(
-        f"Starting Load Balancer Controller for {args.hosts} hosts. Using Round-Robin Priority."
-    )
+    #active_policy = LeastUtilizedPolicy()
+    #print(
+    #f"Starting Load Balancer Controller for {args.hosts} hosts. Using Leastu."
+    #)
+
+    #active_policy = RoundRobinPolicy()
+    #print(
+    #    f"Starting Load Balancer Controller for {args.hosts} hosts. Using Round-Robin Priority."
+    #)
     # active_policy = MabPolicy()
 
-    #active_policy = MarginalCostPolicy()
-    #print(
-    #    f"Starting Load Balancer Controller for {args.hosts} hosts. Using Marginal-cost Energy-Aware Priority."
-    #)
+    active_policy = MarginalCostPolicy()
+    print(
+        f"Starting Load Balancer Controller for {args.hosts} hosts. Using Marginal-cost Energy-Aware Priority."
+    )
 
     ctrl = MyLBController(active_policy, P4INFO_FILE, JSON_FILE, num_hosts=args.hosts)
