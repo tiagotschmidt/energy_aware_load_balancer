@@ -15,8 +15,8 @@ import (
 )
 
 const LOG_DIR = "logs"
-const DATA_FILE = "sift_data/dataset.npy"
-const MAX_VECTORS = 100000
+const DATA_FILE = "sift_data/dataset_10k.npy"
+const MAX_VECTORS = 10000
 const THROTTLE_CAP = 340 // Simulation throughput is ~340 req/sec, so we will throttle to that level to avoid overloading the server (mimics servers exhaustion)
 
 var (
@@ -180,7 +180,7 @@ func main() {
 
 	csvFile, _ := os.Create(fmt.Sprintf("%s/%s_work.csv", LOG_DIR, *id))
 
-	go monitorThroughput(*id, 1000)
+	go monitorThroughput(*id, 100)
 
 	throttle := make(chan struct{}, THROTTLE_CAP)
 
@@ -204,16 +204,21 @@ func main() {
 	for true {
 		data := make([]byte, 2048)
 		n, address, err := socket.ReadFromUDP(data)
+		var finished = false
 
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			continue
 		}
 
-		select {
-		case <-throttle:
-			go handle_request(database, socket, address, *id, csvFile, data[:n])
-		default:
+		// --- CHECK THE THROTTLE ---
+		for !finished {
+			select {
+			case <-throttle:
+				go handle_request(database, socket, address, *id, csvFile, data[:n])
+				finished = true
+			default:
+			}
 		}
 	}
 }
