@@ -17,6 +17,7 @@ import (
 const LOG_DIR = "logs"
 const DATA_FILE = "sift_data/dataset.npy"
 const MAX_VECTORS = 100000
+const THROTTLE_CAP = 340 // Simulation throughput is ~340 req/sec, so we will throttle to that level to avoid overloading the server (mimics servers exhaustion)
 
 var (
 	port = kingpin.Flag("port", "Port to listen on").Default("8080").String()
@@ -181,6 +182,23 @@ func main() {
 
 	go monitorThroughput(*id, 1000)
 
+	throttle := make(chan struct{}, THROTTLE_CAP)
+
+	for i := 0; i < THROTTLE_CAP; i++ {
+		throttle <- struct{}{}
+	}
+
+	go func() {
+		ticker := time.NewTicker(time.Second / THROTTLE_CAP)
+		for range ticker.C {
+			select {
+			case throttle <- struct{}{}:
+			default:
+				// Throttle is already at max (340); do nothing
+			}
+		}
+	}()
+
 	fmt.Printf("--- Server Listening on UDP %s ---\n", *port)
 
 	for true {
@@ -192,6 +210,10 @@ func main() {
 			continue
 		}
 
-		go handle_request(database, socket, address, *id, csvFile, data[:n])
+		select {
+		case <-throttle:
+			go handle_request(database, socket, address, *id, csvFile, data[:n])
+		default:
+		}
 	}
 }
