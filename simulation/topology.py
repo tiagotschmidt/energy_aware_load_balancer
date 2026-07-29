@@ -4,6 +4,7 @@ import json
 import argparse
 import random
 import sys
+import subprocess
 
 SWITCH_START_TIMEOUT = 10
 # Ensure p4-utils is in the path when running from the project root
@@ -17,8 +18,6 @@ from mininet.net import Mininet
 from mininet.topo import Topo
 from mininet.cli import CLI
 from p4_mininet import P4Switch, P4Host
-from p4_mininet import P4Switch
-
 from p4runtime_switch import P4RuntimeSwitch
 
 CONFIG_PATH = "simulation/config/host_profiles.json"
@@ -88,25 +87,57 @@ def run_simulation(num_hosts):
     h1 = net.get("h1")
     h1.cmd("arp -s 10.0.0.1 08:00:00:00:01:00")
 
-    for i in range(2, num_hosts + 1):
-        host = net.get(f"h{i}")
+    agent_processes = []
 
-        print(f"Starting Sift and Sim Agent on {host.name}...")
+    try:
+        for i in range(2, num_hosts + 1):
+            host = net.get(f"h{i}")
 
-        host.cmd("arp -s 10.0.0.100 00:00:00:00:00:01")
+            print(
+                f"Starting Sift (inside namespace) and Sim Agent (outside namespace) on {host.name}..."
+            )
 
-        # Execute Sift server using uv
-        host.cmd(
-            f"cd sift && ./sift_server --id {host.name} --port 8080  > /tmp/{host.name}_sift_server.log 2>&1 &"
-        )
+            host.cmd("arp -s 10.0.0.100 00:00:00:00:00:01")
 
-        # Execute Simulated Agent using uv
-        host.cmd(
-            f"python3 simulation/server_agent/sim_server_agent.py {host.name} --controller-ip 10.0.0.100 > /tmp/{host.name}_agent.log 2>&1 &"
-        )
+            # Execute Sift server INSIDE the Mininet host namespace
+            host.cmd(
+                f"cd sift && ./sift_server --id {host.name} --port 8080 > /tmp/{host.name}_sift_server.log 2>&1 &"
+            )
 
-    CLI(net)
-    net.stop()
+            # Execute Simulated Agent OUTSIDE the Mininet namespace (Root OS)
+            # We point it directly to 127.0.0.1:50001 where the controller is listening
+            agent_cmd = [
+                sys.executable,
+                "simulation/server_agent/sim_server_agent.py",
+                host.name,
+                "--controller-ip",
+                "127.0.0.1",
+                "--port",
+                "50001",
+            ]
+
+            log_file = open(f"/tmp/{host.name}_agent.log", "w")
+            proc = subprocess.Popen(
+                agent_cmd, stdout=log_file, stderr=subprocess.STDOUT
+            )
+            agent_processes.append((proc, log_file))
+
+        CLI(net)
+
+    finally:
+        print("\n--- Cleaning up external agent processes... ---")
+        for proc, lf in agent_processes:
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+            except Exception:
+                proc.kill()
+            finally:
+                lf.close()
+
+        # Fallback cleanup just in case any background agents lingered
+        os.system("pkill -f sim_server_agent.py >/dev/null 2>&1")
+        net.stop()
 
 
 if __name__ == "__main__":
