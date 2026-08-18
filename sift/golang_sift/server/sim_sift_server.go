@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -14,8 +15,9 @@ import (
 )
 
 const LOG_DIR = "logs"
-const DATA_FILE = "sift_data/dataset.npy"
-const MAX_VECTORS = 100000
+const DATA_FILE = "sift_data/dataset_10k.npy"
+const MAX_VECTORS = 100
+const THROTTLE_CAP = 34 // Simulation throughput is ~340 req/sec, so we will throttle to that level to avoid overloading the server (mimics servers exhaustion)
 
 var (
 	port = kingpin.Flag("port", "Port to listen on").Default("8080").String()
@@ -128,13 +130,18 @@ func handle_request(databaseVectors []float32, socket *net.UDPConn, address *net
 
 func loadDatabase(filename string) ([]float32, error) {
 	var returnDatabase []float32
-	f, err := os.Open(filename)
+
+	// 1. Read the entire file into RAM in one system call
+	fileBytes, err := os.ReadFile(filename)
 	if err != nil {
 		return returnDatabase, err
 	}
-	defer f.Close()
 
-	err = npyio.Read(f, &returnDatabase)
+	// 2. Create an in-memory reader
+	memoryReader := bytes.NewReader(fileBytes)
+
+	// 3. npyio parses from RAM instantly
+	err = npyio.Read(memoryReader, &returnDatabase)
 	return returnDatabase, err
 }
 
@@ -173,19 +180,45 @@ func main() {
 
 	csvFile, _ := os.Create(fmt.Sprintf("%s/%s_work.csv", LOG_DIR, *id))
 
-	go monitorThroughput(*id, 1000)
+	go monitorThroughput(*id, 100)
+
+	throttle := make(chan struct{}, THROTTLE_CAP)
+
+	for i := 0; i < THROTTLE_CAP; i++ {
+		throttle <- struct{}{}
+	}
+
+	go func() {
+		ticker := time.NewTicker(time.Second / THROTTLE_CAP)
+		for range ticker.C {
+			select {
+			case throttle <- struct{}{}:
+			default:
+				// Throttle is already at max (340); do nothing
+			}
+		}
+	}()
 
 	fmt.Printf("--- Server Listening on UDP %s ---\n", *port)
 
 	for true {
 		data := make([]byte, 2048)
 		n, address, err := socket.ReadFromUDP(data)
+		var finished = false
 
 		if err != nil {
 			fmt.Printf("Error: %v\n", err)
 			continue
 		}
 
-		go handle_request(database, socket, address, *id, csvFile, data[:n])
+		// --- CHECK THE THROTTLE ---
+		for !finished {
+			select {
+			case <-throttle:
+				go handle_request(database, socket, address, *id, csvFile, data[:n])
+				finished = true
+			default:
+			}
+		}
 	}
 }

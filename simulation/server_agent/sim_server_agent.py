@@ -13,7 +13,7 @@ CONFIG_PATH = "simulation/config/host_profiles.json"
 INTERVAL = 0.5
 
 # Saturation ceiling derived from simulation with 10 servers. The cluster's maximum throughput was 3400 (100% CPU reached at ~340 RPS)
-SATURATION_RPS = 340.0
+SATURATION_RPS = 34.0
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
@@ -25,10 +25,10 @@ def load_host_profile(host_name):
     try:
         with open(CONFIG_PATH, "r") as f:
             profiles = json.load(f)
-            return profiles.get(host_name, {"m": 0.0636, "c": 4.80, "pool": "decode"})
+            return profiles.get(host_name, {"m": 1.0, "c": 4.8, "pool": "decode"})
     except Exception as e:
         logging.warning(f"Could not load config ({e}). Using default profile.")
-        return {"m": 0.0636, "c": 4.80, "pool": "decode"}
+        return {"m": 1.0, "c": 4.8, "pool": "decode"}
 
 
 def calculate_power_from_util(util, heterogenous_factor=1.0, idle_base=4.80):
