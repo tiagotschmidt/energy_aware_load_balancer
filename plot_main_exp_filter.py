@@ -6,6 +6,7 @@
 # ]
 # ///
 
+import os
 import pandas as pd
 import matplotlib.pyplot as plt
 from pydantic import BaseModel
@@ -72,7 +73,7 @@ def parse_logs(
 
         # --- DROP DETECTION ---
         # Calculate expected requests based on the 60-second execution window
-        expected_requests = rps * 10.0
+        expected_requests = rps * 60.0
 
         # Allow a 1% tolerance for window boundary timing differences.
         # Break the loop to stop processing once drops are detected.
@@ -134,15 +135,26 @@ def plot_comparison(
     Allows capping the x-axis via max_plot_rps.
     Normalizes power usage against a specified baseline experiment.
     """
-    show_latency = any(s.p99_latency_ms > 0 for e in experiments for s in e.steps)
-    rows = 2 if show_latency else 3
+    # Publication style configuration
+    plt.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["DejaVu Sans", "Helvetica", "Arial"],
+        "axes.edgecolor": "#333333",
+        "axes.linewidth": 1.0,
+        "xtick.direction": "in",
+        "ytick.direction": "in",
+        "xtick.major.size": 4.5,
+        "ytick.major.size": 4.5,
+    })
 
-    fig, axes = plt.subplots(rows, 1, figsize=(10, 4 * rows), sharex=True)
+    show_latency = any(s.p99_latency_ms > 0 for e in experiments for s in e.steps)
+    rows = 4 if show_latency else 3
+
+    fig, axes = plt.subplots(rows, 1, figsize=(7.5, 2.6 * rows), sharex=True, dpi=300)
     if rows == 1:
         axes = [axes]
 
     # --- NORMALIZATION SETUP ---
-    # Extract the baseline DataFrame to use as the 100% denominator
     baseline_exp = next((e for e in experiments if e.name == baseline_name), None)
     if baseline_exp:
         baseline_df = baseline_exp.to_df().set_index("target_rps")["cluster_watts"]
@@ -163,13 +175,10 @@ def plot_comparison(
 
         # --- APPLY NORMALIZATION ---
         if baseline_df is not None:
-            # Map the baseline watts to the corresponding RPS in the current dataframe
             mapped_baseline = df["target_rps"].map(baseline_df)
             df["plot_power"] = (df["cluster_watts"] / mapped_baseline) * 100
-            y_label_power = f"Normalized Power (% of {baseline_name})"
         else:
             df["plot_power"] = df["cluster_watts"]
-            y_label_power = "Cluster Power (Watts)"
 
         curr = 0
 
@@ -181,100 +190,131 @@ def plot_comparison(
                 exp.line_style,
                 color=exp.color,
                 label=exp.name,
+                linewidth=1.8,
+                markersize=5.0,
+                markevery=3,
             )
-            axes[curr].set_ylabel("P99 Latency (ms)")
-            axes[curr].set_title("System Latency (Lower is Better)")
             curr += 1
 
         # 2. Power
-        axes[curr].plot(df["target_rps"], df["cluster_watts"],
-                      exp.line_style, color=exp.color, label=exp.name)
-        axes[curr].set_ylabel("Cluster Power (Watts)")
-        axes[curr].set_title("Energy Consumption")
+        axes[curr].plot(
+            df["target_rps"],
+            df["cluster_watts"],
+            exp.line_style,
+            color=exp.color,
+            label=exp.name,
+            linewidth=1.8,
+            markersize=5.0,
+            markevery=3,
+        )
         curr += 1
 
-        # # 3. Power Normalized
-        # axes[curr].plot(
-        #     df["target_rps"],
-        #     df["plot_power"],
-        #     exp.line_style,
-        #     color=exp.color,
-        #     label=exp.name,
-        # )
-        # axes[curr].set_ylabel(y_label_power)
-        # axes[curr].set_title("Energy Consumption (Normalized)")
-        # axes[curr].set_ylim(0, 100)  # Force Y-axis limits here
-        # axes[curr].yaxis.set_major_locator(ticker.MultipleLocator(10))
-        # curr += 1
+        # 3. Power Normalized
+        axes[curr].plot(
+            df["target_rps"],
+            df["plot_power"],
+            exp.line_style,
+            color=exp.color,
+            label=exp.name,
+            linewidth=1.8,
+            markersize=5.0,
+            markevery=3,
+        )
+        curr += 1
 
-        # # 4. PDP
-        # axes[curr].plot(df["target_rps"], df["quality"],
-        #               exp.line_style, color=exp.color, label=exp.name)
-        # axes[curr].set_ylabel("PDP")
-        # axes[curr].set_title("Quality (Higher is Better)")
+        # 4. Throughput
+        axes[curr].plot(
+            df["target_rps"],
+            df["actual_throughput"],
+            exp.line_style,
+            color=exp.color,
+            label=exp.name,
+            linewidth=1.8,
+            markersize=5.0,
+            markevery=3,
+        )
 
-    axes[-1].set_xlabel("Target RPS")
+    # --- SET AXIS LABELS AND TITLES ONCE ---
+    idx = 0
+    if show_latency:
+        axes[idx].set_ylabel("P99 Latency (ms)", fontsize=11, fontweight="bold")
+        axes[idx].set_title("(a) System Latency (Lower is Better)", fontsize=12, fontweight="bold")
+        idx += 1
+
+    axes[idx].set_ylabel("Cluster Power (Watts)", fontsize=11, fontweight="bold")
+    axes[idx].set_title("(b) Energy Consumption", fontsize=12, fontweight="bold")
+    idx += 1
+
+    y_label_power = f"Norm. Power (% of {baseline_name})" if baseline_df is not None else "Cluster Power (Watts)"
+    axes[idx].set_ylabel(y_label_power, fontsize=11, fontweight="bold")
+    axes[idx].set_title("(c) Energy Consumption (Normalized)", fontsize=12, fontweight="bold")
+    axes[idx].set_ylim(0, 105)
+    axes[idx].yaxis.set_major_locator(ticker.MultipleLocator(20))
+    idx += 1
+
+    axes[idx].set_ylabel("Throughput (RPS)", fontsize=11, fontweight="bold")
+    axes[idx].set_title("(d) Throughput Capacity", fontsize=12, fontweight="bold")
+
+    axes[-1].set_xlabel("Target RPS", fontsize=11, fontweight="bold")
 
     for ax in axes:
-        ax.grid(True, linestyle="--", alpha=0.6)
-        ax.legend()
+        ax.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
+        ax.legend(fontsize=9.5, framealpha=0.92)
 
+    # Save output figures
+    output_pdf = output if output.endswith(".pdf") else f"{output}.pdf"
+    output_png = output_pdf.replace(".pdf", ".png")
+    
     plt.tight_layout()
-    plt.savefig(output, format="png", bbox_inches="tight")
-    print(f"Success: {output} generated.")
+    plt.savefig(output_pdf, format="pdf", dpi=300, bbox_inches="tight")
+    plt.savefig(output_png, format="png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Success: {output_pdf} and {output_png} generated.")
 
 
 def main():
     try:
         data = [
-             parse_logs(
+            parse_logs(
                 "Round Robin",
                 "red",
                 "--s",
-                "simulation_data/logs/client_sift_experiment.csv",
-                ["simulation_data/logs/h2_energy.csv", "simulation_data/logs/h3_energy.csv"],
+                "paper/hardware_sift/roundrobin/client_sift_experiment.csv",
+                [
+                    "paper/hardware_sift/roundrobin/h2_energy.csv",
+                    "paper/hardware_sift/roundrobin/h3_energy.csv",
+                ],
             ),
-            # parse_logs(
-            #     "Round Robin",
-            #     "red",
-            #     "--s",
-            #     "data/roundrobin/client_sift_experiment.csv",
-            #     ["data/roundrobin/h2_energy.csv", "data/roundrobin/h3_energy.csv"],
-            # ),
-            # parse_logs(
-            #     "Least Utilized",
-            #     "orange",
-            #     "--s",
-            #     "data/leastu/client_sift_experiment.csv",
-            #     ["data/leastu/h2_energy.csv", "data/leastu/h3_energy.csv"],
-            # ),
-            # parse_logs(
-            #     "Energy Aware - Marginal",
-            #     "green",
-            #     "-o",
-            #     "data/marginal/client_sift_experiment.csv",
-            #     ["data/marginal/h2_energy.csv", "data/marginal/h3_energy.csv"],
-            # ),
-            # parse_logs(
-            #     "Energy Aware - WMC",
-            #     "yellow",
-            #     "-o",
-            #     "data/wmc/client_sift_experiment.csv",
-            #     ["data/wmc/h2_energy.csv", "data/wmc/h3_energy.csv"],
-            # ),
+            parse_logs(
+                "Least Utilized",
+                "orange",
+                "--s",
+                "paper/hardware_sift/leastu/client_sift_experiment.csv",
+                [
+                    "paper/hardware_sift/leastu/h2_energy.csv",
+                    "paper/hardware_sift/leastu/h3_energy.csv",
+                ],
+            ),
+            parse_logs(
+                "Energy Aware",
+                "green",
+                "-o",
+                "paper/hardware_sift/wmc/client_sift_experiment.csv",
+                [
+                    "paper/hardware_sift/wmc/h2_energy.csv",
+                    "paper/hardware_sift/wmc/h3_energy.csv",
+                ],
+            ),
         ]
-        filename_and_current_timestamp = (
-            f"main_experiment_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.png"
-        )
 
-        max_rps_cutoff = 4000
+        output_file = "paper/hardware.pdf"
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
         # Passed 'Round Robin' implicitly as the default baseline_name
         plot_comparison(
             data,
-            filename_and_current_timestamp,
-            max_plot_rps=max_rps_cutoff,
-            # baseline_name="Energy Aware - Marginal",
+            output_file,
+            baseline_name="Round Robin",
         )
     except Exception as e:
         print(f"Pipeline Failed: {e}")
