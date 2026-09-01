@@ -272,10 +272,10 @@ def plot_performance_metrics(
         "ytick.major.size": 4.5,
     })
 
-    fig, axes = plt.subplots(3, 1, figsize=(7.2, 8.8), sharex=True, dpi=300)
+    fig, axes = plt.subplots(2, 1, figsize=(7.2, 8.8), sharex=True, dpi=300)
     plt.subplots_adjust(hspace=0.22)
 
-    ax_lat, ax_power, ax_tput = axes[0], axes[1], axes[2]
+    ax_lat, ax_power = axes[0], axes[1]
 
     for exp in experiments:
         df = exp.to_df()
@@ -312,16 +312,16 @@ def plot_performance_metrics(
         )
 
         # 3. Throughput
-        ax_tput.plot(
-            df["target_rps"],
-            df["actual_throughput"],
-            line_fmt,
-            color=exp.color,
-            label=exp.name,
-            markersize=5.0,
-            linewidth=1.8,
-            markevery=3,
-        )
+        #ax_tput.plot(
+        #    df["target_rps"],
+        #    df["actual_throughput"],
+        #    line_fmt,
+        #    color=exp.color,
+        #    label=exp.name,
+        #    markersize=5.0,
+        #    linewidth=1.8,
+        #    markevery=3,
+        #)
 
     # Subplot 1: Latency Styling
     ax_lat.set_ylabel("P99 Latency (ms)", fontsize=11, fontweight="bold")
@@ -335,10 +335,10 @@ def plot_performance_metrics(
     ax_power.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
 
     # Subplot 3: Throughput Styling
-    ax_tput.set_ylabel("Throughput (RPS)", fontsize=11, fontweight="bold")
-    ax_tput.set_xlabel("Target Load (RPS)", fontsize=11, fontweight="bold")
-    ax_tput.set_title("(c) Throughput Capacity", fontsize=12, fontweight="bold")
-    ax_tput.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
+    #ax_tput.set_ylabel("Throughput (RPS)", fontsize=11, fontweight="bold")
+    #ax_tput.set_xlabel("Target Load (RPS)", fontsize=11, fontweight="bold")
+    #ax_tput.set_title("(c) Throughput Capacity", fontsize=12, fontweight="bold")
+    #ax_tput.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
 
     # Save output figures
     plt.savefig(output_pdf, format="pdf", dpi=300, bbox_inches="tight")
