@@ -15,15 +15,14 @@ Description:
     across various threshold levels (e.g. 50%, 60%, 70%, 80%, 90%, 100%).
     
     Generates publication-quality figures for:
-      (a) P99 Latency (ms) vs Target Load (RPS)
-      (b) Cluster Energy Consumption (Watts) vs Target Load (RPS)
-      (c) Throughput Capacity (RPS) vs Target Load (RPS)
+      1. P99 Latency (ms) vs Target Load (RPS)
+      2. Cluster Energy Consumption (Watts) vs Target Load (RPS)
       (Optional) Normalized Energy Consumption (% of Baseline)
 
 Usage:
     uv run plot_fallback.py
     # or with custom options:
-    uv run plot_fallback.py --data-dir paper/fallback --output paper/fallback.pdf
+    uv run plot_fallback.py --data-dir paper/fallback --output-dir paper/
 """
 
 import os
@@ -156,18 +155,16 @@ def parse_logs(
     return Experiment(name=name, color=color, line_style=style, marker=marker, steps=steps)
 
 
-def plot_comparison(
+def plot_latency_metric(
     experiments: List[Experiment],
-    output: str = "paper/fallback.pdf",
+    output_pdf: str = "paper/fallback_latency.pdf",
+    output_png: str = "paper/fallback_latency.png",
     max_plot_rps: Optional[int] = None,
-    baseline_name: Optional[str] = None,
 ):
     """
-    Total function: Guarantees the plot based on the existence of Experiment types.
-    Allows capping the x-axis via max_plot_rps.
-    Optionally normalizes power usage against a specified baseline experiment.
+    Generates a standalone publication figure for:
+      P99 Latency (ms) vs Target Load
     """
-    # Publication style configuration matching plot_main_exp_filter.py
     plt.rcParams.update({
         "font.family": "sans-serif",
         "font.sans-serif": ["DejaVu Sans", "Helvetica", "Arial"],
@@ -179,59 +176,77 @@ def plot_comparison(
         "ytick.major.size": 4.5,
     })
 
-    show_latency = any(s.p99_latency_ms > 0 for e in experiments for s in e.steps)
-    has_baseline = baseline_name is not None and any(e.name == baseline_name for e in experiments)
-
-    # 3 rows if baseline normalization is enabled, 2 rows for standard P99/Power
-    rows = (3 if has_baseline else 2) if show_latency else (2 if has_baseline else 1)
-
-    fig, axes = plt.subplots(rows, 1, figsize=(7.5, 2.7 * rows), sharex=True, dpi=300)
-    if rows == 1:
-        axes = [axes]
-
-    # --- NORMALIZATION SETUP ---
-    baseline_df = None
-    if has_baseline:
-        baseline_exp = next((e for e in experiments if e.name == baseline_name), None)
-        if baseline_exp:
-            baseline_df = baseline_exp.to_df().set_index("target_rps")["cluster_watts"]
-        else:
-            print(f"Warning: Baseline '{baseline_name}' not found. Plotting without normalization.")
+    fig, ax = plt.subplots(figsize=(6.8, 4.6), dpi=300)
 
     for exp in experiments:
         df = exp.to_df()
         if df.empty:
             continue
 
-        # Filter the DataFrame if a maximum RPS is provided
         if max_plot_rps is not None:
             df = df[df["target_rps"] <= max_plot_rps]
 
-        # --- APPLY NORMALIZATION ---
-        if baseline_df is not None:
-            mapped_baseline = df["target_rps"].map(baseline_df)
-            df["plot_power"] = (df["cluster_watts"] / mapped_baseline) * 100
+        line_fmt = f"{exp.line_style}{exp.marker}" if exp.marker else exp.line_style
+
+        ax.plot(
+            df["target_rps"],
+            df["p99_latency_ms"],
+            line_fmt,
+            color=exp.color,
+            label=exp.name,
+            linewidth=1.8,
+            markersize=5.0,
+            markevery=2,
+        )
+
+    ax.set_xlabel("Target Load (RPS)", fontsize=11, fontweight="bold")
+    ax.set_ylabel("P99 Latency (ms)", fontsize=11, fontweight="bold")
+    ax.set_title("System Latency", fontsize=12, fontweight="bold")
+    ax.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
+    ax.legend(fontsize=9.5, framealpha=0.92, loc="upper left")
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_pdf)), exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(output_pdf, format="pdf", dpi=300, bbox_inches="tight")
+    plt.savefig(output_png, format="png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"\n[+] Latency figure generated successfully:\n    - {output_pdf}\n    - {output_png}")
+
+
+def plot_power_metric(
+    experiments: List[Experiment],
+    output_pdf: str = "paper/fallback_power.pdf",
+    output_png: str = "paper/fallback_power.png",
+    max_plot_rps: Optional[int] = None,
+):
+    """
+    Generates a standalone publication figure for:
+      Cluster Energy Consumption (Watts) vs Target Load
+    """
+    plt.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["DejaVu Sans", "Helvetica", "Arial"],
+        "axes.edgecolor": "#333333",
+        "axes.linewidth": 1.0,
+        "xtick.direction": "in",
+        "ytick.direction": "in",
+        "xtick.major.size": 4.5,
+        "ytick.major.size": 4.5,
+    })
+
+    fig, ax = plt.subplots(figsize=(6.8, 4.6), dpi=300)
+
+    for exp in experiments:
+        df = exp.to_df()
+        if df.empty:
+            continue
+
+        if max_plot_rps is not None:
+            df = df[df["target_rps"] <= max_plot_rps]
 
         line_fmt = f"{exp.line_style}{exp.marker}" if exp.marker else exp.line_style
 
-        curr = 0
-
-        # 1. Latency
-        if show_latency:
-            axes[curr].plot(
-                df["target_rps"],
-                df["p99_latency_ms"],
-                line_fmt,
-                color=exp.color,
-                label=exp.name,
-                linewidth=1.8,
-                markersize=5.0,
-                markevery=2,
-            )
-            curr += 1
-
-        # 2. Power
-        axes[curr].plot(
+        ax.plot(
             df["target_rps"],
             df["cluster_watts"],
             line_fmt,
@@ -241,68 +256,96 @@ def plot_comparison(
             markersize=5.0,
             markevery=2,
         )
-        curr += 1
 
-        # 3. Power Normalized (if baseline is specified)
-        if has_baseline and baseline_df is not None:
-            axes[curr].plot(
-                df["target_rps"],
-                df["plot_power"],
-                line_fmt,
-                color=exp.color,
-                label=exp.name,
-                linewidth=1.8,
-                markersize=5.0,
-                markevery=2,
-            )
-            curr += 1
-
-
-
-    # --- SET AXIS LABELS AND TITLES ---
-    idx = 0
-    if show_latency:
-        axes[idx].set_ylabel("P99 Latency (ms)", fontsize=11, fontweight="bold")
-        axes[idx].set_title("(a) System Latency (Lower is Better)", fontsize=12, fontweight="bold")
-        idx += 1
-
-    axes[idx].set_ylabel("Cluster Power (Watts)", fontsize=11, fontweight="bold")
-    letter = "(b)" if show_latency else "(a)"
-    axes[idx].set_title(f"{letter} Energy Consumption", fontsize=12, fontweight="bold")
-    idx += 1
-
-    if has_baseline and baseline_df is not None:
-        y_label_power = f"Norm. Power (% of {baseline_name})"
-        axes[idx].set_ylabel(y_label_power, fontsize=11, fontweight="bold")
-        letter = "(c)" if show_latency else "(b)"
-        axes[idx].set_title(f"{letter} Energy Consumption (Normalized)", fontsize=12, fontweight="bold")
-        axes[idx].set_ylim(0, 115)
-        axes[idx].yaxis.set_major_locator(ticker.MultipleLocator(20))
-        idx += 1
-
-    axes[-1].set_xlabel("Target RPS", fontsize=11, fontweight="bold")
-
-    for ax in axes:
-        ax.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
-        
-    # Legend only on the first plot (Latency) to avoid straddling data
-    axes[0].legend(fontsize=9.5, framealpha=0.92, loc="upper left")
-
-    # Save output figures
-    output_pdf = output if output.endswith(".pdf") else f"{output}.pdf"
-    output_png = output_pdf.replace(".pdf", ".png")
+    ax.set_xlabel("Target Load (RPS)", fontsize=11, fontweight="bold")
+    ax.set_ylabel("Cluster Power (Watts)", fontsize=11, fontweight="bold")
+    ax.set_title("Cluster Average Power Consumption", fontsize=12, fontweight="bold")
+    ax.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
+    ax.legend(fontsize=9.5, framealpha=0.92, loc="upper left")
 
     os.makedirs(os.path.dirname(os.path.abspath(output_pdf)), exist_ok=True)
     plt.tight_layout()
     plt.savefig(output_pdf, format="pdf", dpi=300, bbox_inches="tight")
     plt.savefig(output_png, format="png", dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"\n[+] Success: Figures saved to:\n    - {output_pdf}\n    - {output_png}")
+    print(f"\n[+] Power figure generated successfully:\n    - {output_pdf}\n    - {output_png}")
+
+
+def plot_power_normalized_metric(
+    experiments: List[Experiment],
+    baseline_name: str,
+    output_pdf: str = "paper/fallback_normalized.pdf",
+    output_png: str = "paper/fallback_normalized.png",
+    max_plot_rps: Optional[int] = None,
+):
+    """
+    Generates a standalone publication figure for:
+      Normalized Energy Consumption (% of Baseline) vs Target Load
+    """
+    baseline_exp = next((e for e in experiments if e.name == baseline_name), None)
+    if not baseline_exp:
+        print(f"Warning: Baseline '{baseline_name}' not found. Cannot plot normalized power.")
+        return
+
+    baseline_df = baseline_exp.to_df().set_index("target_rps")["cluster_watts"]
+
+    plt.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["DejaVu Sans", "Helvetica", "Arial"],
+        "axes.edgecolor": "#333333",
+        "axes.linewidth": 1.0,
+        "xtick.direction": "in",
+        "ytick.direction": "in",
+        "xtick.major.size": 4.5,
+        "ytick.major.size": 4.5,
+    })
+
+    fig, ax = plt.subplots(figsize=(6.8, 4.6), dpi=300)
+
+    for exp in experiments:
+        df = exp.to_df()
+        if df.empty:
+            continue
+
+        if max_plot_rps is not None:
+            df = df[df["target_rps"] <= max_plot_rps]
+
+        mapped_baseline = df["target_rps"].map(baseline_df)
+        df["plot_power"] = (df["cluster_watts"] / mapped_baseline) * 100
+
+        line_fmt = f"{exp.line_style}{exp.marker}" if exp.marker else exp.line_style
+
+        ax.plot(
+            df["target_rps"],
+            df["plot_power"],
+            line_fmt,
+            color=exp.color,
+            label=exp.name,
+            linewidth=1.8,
+            markersize=5.0,
+            markevery=2,
+        )
+
+    ax.set_xlabel("Target Load (RPS)", fontsize=11, fontweight="bold")
+    y_label_power = f"Norm. Power (% of {baseline_name})"
+    ax.set_ylabel(y_label_power, fontsize=11, fontweight="bold")
+    ax.set_title("Energy Consumption (Normalized)", fontsize=12, fontweight="bold")
+    ax.set_ylim(0, 115)
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(20))
+    ax.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
+    ax.legend(fontsize=9.5, framealpha=0.92, loc="upper left")
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_pdf)), exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(output_pdf, format="pdf", dpi=300, bbox_inches="tight")
+    plt.savefig(output_png, format="png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"\n[+] Normalized Power figure generated successfully:\n    - {output_pdf}\n    - {output_png}")
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Plot WMC Fallback Threshold Experiment Results (P99 Latency, Energy Consumption, and Throughput)."
+        description="Plot WMC Fallback Threshold Experiment Results into separate publication figures."
     )
     parser.add_argument(
         "--data-dir",
@@ -311,16 +354,52 @@ def main():
         help="Directory containing fallback subdirectories (default: paper/fallback)",
     )
     parser.add_argument(
-        "--output",
+        "--output-dir",
         type=str,
-        default="paper/fallback.pdf",
-        help="Output PDF/PNG file path (default: paper/fallback.pdf)",
+        default="paper",
+        help="Output directory to save generated PDF and PNG figures (default: paper)",
+    )
+    parser.add_argument(
+        "--latency-pdf",
+        type=str,
+        default=None,
+        help="Custom path for Latency PDF (default: <output-dir>/fallback_latency.pdf)",
+    )
+    parser.add_argument(
+        "--latency-png",
+        type=str,
+        default=None,
+        help="Custom path for Latency PNG (default: <output-dir>/fallback_latency.png)",
+    )
+    parser.add_argument(
+        "--power-pdf",
+        type=str,
+        default=None,
+        help="Custom path for Power PDF (default: <output-dir>/fallback_power.pdf)",
+    )
+    parser.add_argument(
+        "--power-png",
+        type=str,
+        default=None,
+        help="Custom path for Power PNG (default: <output-dir>/fallback_power.png)",
+    )
+    parser.add_argument(
+        "--normalized-pdf",
+        type=str,
+        default=None,
+        help="Custom path for Normalized Power PDF (default: <output-dir>/fallback_normalized.pdf)",
+    )
+    parser.add_argument(
+        "--normalized-png",
+        type=str,
+        default=None,
+        help="Custom path for Normalized Power PNG (default: <output-dir>/fallback_normalized.png)",
     )
     parser.add_argument(
         "--baseline",
         type=str,
         default=None,
-        help="Optional baseline name for normalized power (e.g. 'Fallback 100%' or 'Fallback 50%')",
+        help="Optional baseline name for normalized power (e.g. 'Fallback 100% (No Fallback)' or 'Round Robin (Reference)')",
     )
     parser.add_argument(
         "--max-rps",
@@ -336,6 +415,15 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # Determine file paths
+    os.makedirs(args.output_dir, exist_ok=True)
+    latency_pdf = args.latency_pdf or os.path.join(args.output_dir, "fallback_latency.pdf")
+    latency_png = args.latency_png or os.path.join(args.output_dir, "fallback_latency.png")
+    power_pdf = args.power_pdf or os.path.join(args.output_dir, "fallback_power.pdf")
+    power_png = args.power_png or os.path.join(args.output_dir, "fallback_power.png")
+    normalized_pdf = args.normalized_pdf or os.path.join(args.output_dir, "fallback_normalized.pdf")
+    normalized_png = args.normalized_png or os.path.join(args.output_dir, "fallback_normalized.png")
 
     # Fallback configuration definitions (matching IEEE/publication palette)
     all_configs = [
@@ -406,7 +494,7 @@ def main():
     experiments: List[Experiment] = []
 
     print("=" * 70)
-    print(" WMC Fallback Threshold Experiment Plotter")
+    print(" WMC Fallback Threshold Experiment Plotter (Separate Figures)")
     print("=" * 70)
 
     for cfg in configs:
@@ -448,12 +536,31 @@ def main():
         print("\n[ERROR] No valid experiment logs could be parsed. Check data paths.")
         sys.exit(1)
 
-    plot_comparison(
+    # 1. Generate Latency Figure
+    plot_latency_metric(
         experiments=experiments,
-        output=args.output,
+        output_pdf=latency_pdf,
+        output_png=latency_png,
         max_plot_rps=args.max_rps,
-        baseline_name=args.baseline,
     )
+
+    # 2. Generate Power Figure
+    plot_power_metric(
+        experiments=experiments,
+        output_pdf=power_pdf,
+        output_png=power_png,
+        max_plot_rps=args.max_rps,
+    )
+
+    # 3. Generate Normalized Power Figure if baseline provided
+    if args.baseline:
+        plot_power_normalized_metric(
+            experiments=experiments,
+            baseline_name=args.baseline,
+            output_pdf=normalized_pdf,
+            output_png=normalized_png,
+            max_plot_rps=args.max_rps,
+        )
 
 
 if __name__ == "__main__":
