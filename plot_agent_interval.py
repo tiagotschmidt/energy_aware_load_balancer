@@ -13,9 +13,10 @@ Agent Update Interval Performance & Overhead Plotting Script
 Description:
     Parses client workload logs, server energy telemetry, and pidstat agent
     resource logs across different agent update intervals (10s, 1s, 0.5s, 0.1s).
-    Generates two publication-ready figures optimized for LaTeX inclusion:
-      1. Main Performance Figure: P99 Latency, Cluster Energy, and Throughput
-      2. Server Agent Overhead Figure: Demonstrates the lightweight footprint
+    Generates publication-ready figures optimized for LaTeX inclusion:
+      1. P99 Latency: P99 Latency vs Target Load
+      2. Cluster Energy: Total Average Power (Watts) vs Target Load
+      3. Server Agent Overhead: Demonstrates the lightweight footprint
          (CPU %usr < 0.4% and Memory RSS ~11.6 MB).
 
 Usage:
@@ -247,19 +248,17 @@ def parse_agent_pidstat(filepath: str) -> Optional[Dict[str, Any]]:
 
 
 # =========================================================================
-# 3. Dedicated Plot 1: Main Performance (P99 Latency, Power, Throughput)
+# 3. Dedicated Plot 1: P99 Latency
 # =========================================================================
-def plot_performance_metrics(
+def plot_latency_metric(
     experiments: List[Experiment],
-    output_pdf: str = "agent_interval_performance.pdf",
-    output_png: str = "agent_interval_performance.png",
+    output_pdf: str = "agent_interval_latency.pdf",
+    output_png: str = "agent_interval_latency.png",
     max_plot_rps: Optional[int] = None,
 ):
     """
-    Generates a standalone 3-panel publication figure for:
-      (a) P99 Latency (ms) vs Target Load
-      (b) Cluster Energy Consumption (Watts) vs Target Load
-      (c) Throughput Capacity (RPS) vs Target Load
+    Generates a standalone publication figure for:
+      P99 Latency (ms) vs Target Load
     """
     plt.rcParams.update({
         "font.family": "sans-serif",
@@ -272,10 +271,7 @@ def plot_performance_metrics(
         "ytick.major.size": 4.5,
     })
 
-    fig, axes = plt.subplots(2, 1, figsize=(7.2, 8.8), sharex=True, dpi=300)
-    plt.subplots_adjust(hspace=0.22)
-
-    ax_lat, ax_power = axes[0], axes[1]
+    fig, ax = plt.subplots(figsize=(6.8, 4.6), dpi=300)
 
     for exp in experiments:
         df = exp.to_df()
@@ -287,8 +283,7 @@ def plot_performance_metrics(
 
         line_fmt = f"{exp.line_style}{exp.marker}"
 
-        # 1. Latency
-        ax_lat.plot(
+        ax.plot(
             df["target_rps"],
             df["p99_latency_ms"],
             line_fmt,
@@ -299,8 +294,59 @@ def plot_performance_metrics(
             markevery=3,
         )
 
-        # 2. Power
-        ax_power.plot(
+    ax.set_xlabel("Target Load (RPS)", fontsize=11, fontweight="bold")
+    ax.set_ylabel("P99 Latency (ms)", fontsize=11, fontweight="bold")
+    ax.set_title("(a) P99 Latency", fontsize=12, fontweight="bold")
+    ax.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
+    ax.legend(loc="upper left", fontsize=10, framealpha=0.92)
+
+    plt.tight_layout()
+    plt.savefig(output_pdf, format="pdf", dpi=300, bbox_inches="tight")
+    plt.savefig(output_png, format="png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+    print(f"\n[+] Latency figure generated successfully:")
+    print(f"    - PDF: {output_pdf}")
+    print(f"    - PNG: {output_png}")
+
+
+# =========================================================================
+# 4. Dedicated Plot 2: Cluster Energy Consumption (Power)
+# =========================================================================
+def plot_power_metric(
+    experiments: List[Experiment],
+    output_pdf: str = "agent_interval_power.pdf",
+    output_png: str = "agent_interval_power.png",
+    max_plot_rps: Optional[int] = None,
+):
+    """
+    Generates a standalone publication figure for:
+      Cluster Energy Consumption (Watts) vs Target Load
+    """
+    plt.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["DejaVu Sans", "Helvetica", "Arial"],
+        "axes.edgecolor": "#333333",
+        "axes.linewidth": 1.0,
+        "xtick.direction": "in",
+        "ytick.direction": "in",
+        "xtick.major.size": 4.5,
+        "ytick.major.size": 4.5,
+    })
+
+    fig, ax = plt.subplots(figsize=(6.8, 4.6), dpi=300)
+
+    for exp in experiments:
+        df = exp.to_df()
+        if df.empty:
+            continue
+
+        if max_plot_rps is not None:
+            df = df[df["target_rps"] <= max_plot_rps]
+
+        line_fmt = f"{exp.line_style}{exp.marker}"
+
+        ax.plot(
             df["target_rps"],
             df["cluster_watts"],
             line_fmt,
@@ -311,47 +357,24 @@ def plot_performance_metrics(
             markevery=3,
         )
 
-        # 3. Throughput
-        #ax_tput.plot(
-        #    df["target_rps"],
-        #    df["actual_throughput"],
-        #    line_fmt,
-        #    color=exp.color,
-        #    label=exp.name,
-        #    markersize=5.0,
-        #    linewidth=1.8,
-        #    markevery=3,
-        #)
+    ax.set_xlabel("Target Load (RPS)", fontsize=11, fontweight="bold")
+    ax.set_ylabel("Cluster Power (Watts)", fontsize=11, fontweight="bold")
+    ax.set_title("(b) Cluster Average Power Consumption", fontsize=12, fontweight="bold")
+    ax.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
+    ax.legend(loc="upper left", fontsize=10, framealpha=0.92)
 
-    # Subplot 1: Latency Styling
-    ax_lat.set_ylabel("P99 Latency (ms)", fontsize=11, fontweight="bold")
-    ax_lat.set_title("(a) P99 Latency (Lower is Better)", fontsize=12, fontweight="bold")
-    ax_lat.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
-    ax_lat.legend(loc="upper left", fontsize=10, framealpha=0.92)
-
-    # Subplot 2: Power Styling
-    ax_power.set_ylabel("Cluster Power (Watts)", fontsize=11, fontweight="bold")
-    ax_power.set_title("(b) Cluster Energy Consumption", fontsize=12, fontweight="bold")
-    ax_power.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
-
-    # Subplot 3: Throughput Styling
-    #ax_tput.set_ylabel("Throughput (RPS)", fontsize=11, fontweight="bold")
-    #ax_tput.set_xlabel("Target Load (RPS)", fontsize=11, fontweight="bold")
-    #ax_tput.set_title("(c) Throughput Capacity", fontsize=12, fontweight="bold")
-    #ax_tput.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
-
-    # Save output figures
+    plt.tight_layout()
     plt.savefig(output_pdf, format="pdf", dpi=300, bbox_inches="tight")
     plt.savefig(output_png, format="png", dpi=300, bbox_inches="tight")
     plt.close(fig)
 
-    print(f"\n[+] Performance figure generated successfully:")
+    print(f"\n[+] Power figure generated successfully:")
     print(f"    - PDF: {output_pdf}")
     print(f"    - PNG: {output_png}")
 
 
 # =========================================================================
-# 4. Dedicated Plot 2: Server Agent Overhead (Lightweight Demonstration)
+# 5. Dedicated Plot 3: Server Agent Overhead (Lightweight Demonstration)
 # =========================================================================
 def plot_agent_overhead(
     df_overhead: pd.DataFrame,
@@ -556,7 +579,7 @@ def plot_agent_overhead(
 
 
 # =========================================================================
-# 5. Main Entry Point
+# 6. Main Entry Point
 # =========================================================================
 def main():
     parser = argparse.ArgumentParser(
@@ -575,16 +598,28 @@ def main():
         help="Output directory to save generated PDF and PNG figures (default: paper)",
     )
     parser.add_argument(
-        "--perf-pdf",
+        "--latency-pdf",
         type=str,
         default=None,
-        help="Custom path for Performance PDF (default: <output-dir>/agent_interval_performance.pdf)",
+        help="Custom path for Latency PDF (default: <output-dir>/agent_interval_latency.pdf)",
     )
     parser.add_argument(
-        "--perf-png",
+        "--latency-png",
         type=str,
         default=None,
-        help="Custom path for Performance PNG (default: <output-dir>/agent_interval_performance.png)",
+        help="Custom path for Latency PNG (default: <output-dir>/agent_interval_latency.png)",
+    )
+    parser.add_argument(
+        "--power-pdf",
+        type=str,
+        default=None,
+        help="Custom path for Power PDF (default: <output-dir>/agent_interval_power.pdf)",
+    )
+    parser.add_argument(
+        "--power-png",
+        type=str,
+        default=None,
+        help="Custom path for Power PNG (default: <output-dir>/agent_interval_power.png)",
     )
     parser.add_argument(
         "--overhead-pdf",
@@ -614,8 +649,10 @@ def main():
 
     # Determine file paths
     os.makedirs(args.output_dir, exist_ok=True)
-    perf_pdf = args.perf_pdf or os.path.join(args.output_dir, "agent_interval_performance.pdf")
-    perf_png = args.perf_png or os.path.join(args.output_dir, "agent_interval_performance.png")
+    latency_pdf = args.latency_pdf or os.path.join(args.output_dir, "agent_interval_latency.pdf")
+    latency_png = args.latency_png or os.path.join(args.output_dir, "agent_interval_latency.png")
+    power_pdf = args.power_pdf or os.path.join(args.output_dir, "agent_interval_power.pdf")
+    power_png = args.power_png or os.path.join(args.output_dir, "agent_interval_power.png")
     overhead_pdf = args.overhead_pdf or os.path.join(args.output_dir, "agent_interval_overhead.pdf")
     overhead_png = args.overhead_png or os.path.join(args.output_dir, "agent_interval_overhead.png")
 
@@ -741,15 +778,23 @@ def main():
 
     all_labels = [c["short_label"] for c in interval_configs]
 
-    # 4. Generate Plot 1: Performance Figure
-    plot_performance_metrics(
+    # 4. Generate Plot 1: Latency Figure
+    plot_latency_metric(
         experiments=experiments,
-        output_pdf=perf_pdf,
-        output_png=perf_png,
+        output_pdf=latency_pdf,
+        output_png=latency_png,
         max_plot_rps=args.max_rps,
     )
 
-    # 5. Generate Plot 2: Agent Overhead Figure
+    # 5. Generate Plot 2: Power Figure
+    plot_power_metric(
+        experiments=experiments,
+        output_pdf=power_pdf,
+        output_png=power_png,
+        max_plot_rps=args.max_rps,
+    )
+
+    # 6. Generate Plot 3: Agent Overhead Figure
     plot_agent_overhead(
         df_overhead=df_overhead,
         all_interval_labels=all_labels,
