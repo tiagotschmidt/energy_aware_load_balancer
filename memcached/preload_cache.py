@@ -1,15 +1,15 @@
 import socket
 import sys
 
-VIP = "10.0.0.1"
+LOCAL_IP = "127.0.0.1"
 PORT = 11211
 TOTAL_KEYS = 100000
 PAYLOAD_SIZE = 512 
 
-print(f"Connecting to VIP {VIP}:{PORT} via TCP...")
+print(f"Connecting to Memcached locally at {LOCAL_IP}:{PORT} via TCP...")
 try:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect((VIP, PORT))
+    s.connect((LOCAL_IP, PORT))
 except Exception as e:
     print(f"Connection failed: {e}")
     sys.exit(1)
@@ -25,5 +25,5 @@ for i in range(TOTAL_KEYS):
         s.recv(4096)
         print(f"  ... inserted {i} keys")
 
-print("Pre-load complete! The backend servers are ready.")
+print("Pre-load complete! The local cache is populated.")
 s.close()
