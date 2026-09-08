@@ -6,7 +6,27 @@
 # ]
 # ///
 
+"""
+Main Hardware SIFT Experiment Plotting Script
+==========================================================================
+Description:
+    Parses client workload logs and server energy telemetry from the hardware SIFT
+    experiments comparing Round Robin, Least Utilized, and Energy Aware.
+    
+    Generates publication-quality figures for:
+      1. P99 Latency (ms) vs Target Load (RPS)
+      2. Cluster Energy Consumption (Watts) vs Target Load (RPS)
+      3. Normalized Energy Consumption (% of Baseline) vs Target Load (RPS)
+
+Usage:
+    uv run plot_main_exp_filter.py
+    # or specify output directory:
+    uv run plot_main_exp_filter.py --output-dir paper/
+"""
+
 import os
+import sys
+import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
 from pydantic import BaseModel
@@ -124,18 +144,16 @@ def calculate_sla_cost(latency, power, sla_limit=200, penalty_weight=1):
         return power + (violation_amount * penalty_weight)
 
 
-def plot_comparison(
+def plot_latency_metric(
     experiments: List[Experiment],
-    output: str = "saturation_results.png",
+    output_pdf: str = "paper/hardware_latency.pdf",
+    output_png: str = "paper/hardware_latency.png",
     max_plot_rps: Optional[int] = None,
-    baseline_name: str = "Round Robin",
 ):
     """
-    Total function: Guarantees the plot based on the existence of Experiment types.
-    Allows capping the x-axis via max_plot_rps.
-    Normalizes power usage against a specified baseline experiment.
+    Generates a standalone publication figure for:
+      P99 Latency (ms) vs Target Load
     """
-    # Publication style configuration
     plt.rcParams.update({
         "font.family": "sans-serif",
         "font.sans-serif": ["DejaVu Sans", "Helvetica", "Arial"],
@@ -147,57 +165,73 @@ def plot_comparison(
         "ytick.major.size": 4.5,
     })
 
-    show_latency = any(s.p99_latency_ms > 0 for e in experiments for s in e.steps)
-    rows = 4 if show_latency else 3
-
-    fig, axes = plt.subplots(rows, 1, figsize=(7.5, 2.6 * rows), sharex=True, dpi=300)
-    if rows == 1:
-        axes = [axes]
-
-    # --- NORMALIZATION SETUP ---
-    baseline_exp = next((e for e in experiments if e.name == baseline_name), None)
-    if baseline_exp:
-        baseline_df = baseline_exp.to_df().set_index("target_rps")["cluster_watts"]
-    else:
-        baseline_df = None
-        print(
-            f"Warning: Baseline '{baseline_name}' not found. Plotting raw watts instead."
-        )
+    fig, ax = plt.subplots(figsize=(6.8, 4.6), dpi=300)
 
     for exp in experiments:
         df = exp.to_df()
         if df.empty:
             continue
 
-        # Filter the DataFrame if a maximum RPS is provided
         if max_plot_rps is not None:
             df = df[df["target_rps"] <= max_plot_rps]
 
-        # --- APPLY NORMALIZATION ---
-        if baseline_df is not None:
-            mapped_baseline = df["target_rps"].map(baseline_df)
-            df["plot_power"] = (df["cluster_watts"] / mapped_baseline) * 100
-        else:
-            df["plot_power"] = df["cluster_watts"]
+        ax.plot(
+            df["target_rps"],
+            df["p99_latency_ms"],
+            exp.line_style,
+            color=exp.color,
+            label=exp.name,
+            linewidth=1.8,
+            markersize=5.0,
+            markevery=3,
+        )
 
-        curr = 0
+    ax.set_xlabel("Target Load (RPS)", fontsize=11, fontweight="bold")
+    ax.set_ylabel("P99 Latency (ms)", fontsize=11, fontweight="bold")
+    ax.set_title("System Latency", fontsize=12, fontweight="bold")
+    ax.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
+    ax.legend(fontsize=9.5, framealpha=0.92, loc="upper left")
 
-        # 1. Latency
-        if show_latency:
-            axes[curr].plot(
-                df["target_rps"],
-                df["p99_latency_ms"],
-                exp.line_style,
-                color=exp.color,
-                label=exp.name,
-                linewidth=1.8,
-                markersize=5.0,
-                markevery=3,
-            )
-            curr += 1
+    os.makedirs(os.path.dirname(os.path.abspath(output_pdf)), exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(output_pdf, format="pdf", dpi=300, bbox_inches="tight")
+    plt.savefig(output_png, format="png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"\n[+] Latency figure generated successfully:\n    - {output_pdf}\n    - {output_png}")
 
-        # 2. Power
-        axes[curr].plot(
+
+def plot_power_metric(
+    experiments: List[Experiment],
+    output_pdf: str = "paper/hardware_power.pdf",
+    output_png: str = "paper/hardware_power.png",
+    max_plot_rps: Optional[int] = None,
+):
+    """
+    Generates a standalone publication figure for:
+      Cluster Energy Consumption (Watts) vs Target Load
+    """
+    plt.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["DejaVu Sans", "Helvetica", "Arial"],
+        "axes.edgecolor": "#333333",
+        "axes.linewidth": 1.0,
+        "xtick.direction": "in",
+        "ytick.direction": "in",
+        "xtick.major.size": 4.5,
+        "ytick.major.size": 4.5,
+    })
+
+    fig, ax = plt.subplots(figsize=(6.8, 4.6), dpi=300)
+
+    for exp in experiments:
+        df = exp.to_df()
+        if df.empty:
+            continue
+
+        if max_plot_rps is not None:
+            df = df[df["target_rps"] <= max_plot_rps]
+
+        ax.plot(
             df["target_rps"],
             df["cluster_watts"],
             exp.line_style,
@@ -207,10 +241,64 @@ def plot_comparison(
             markersize=5.0,
             markevery=3,
         )
-        curr += 1
 
-        # 3. Power Normalized
-        axes[curr].plot(
+    ax.set_xlabel("Target Load (RPS)", fontsize=11, fontweight="bold")
+    ax.set_ylabel("Cluster Power (Watts)", fontsize=11, fontweight="bold")
+    ax.set_title("Cluster Average Power Consumption", fontsize=12, fontweight="bold")
+    ax.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
+    ax.legend(fontsize=9.5, framealpha=0.92, loc="upper left")
+
+    os.makedirs(os.path.dirname(os.path.abspath(output_pdf)), exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(output_pdf, format="pdf", dpi=300, bbox_inches="tight")
+    plt.savefig(output_png, format="png", dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"\n[+] Power figure generated successfully:\n    - {output_pdf}\n    - {output_png}")
+
+
+def plot_power_normalized_metric(
+    experiments: List[Experiment],
+    baseline_name: str = "Round Robin",
+    output_pdf: str = "paper/hardware_normalized.pdf",
+    output_png: str = "paper/hardware_normalized.png",
+    max_plot_rps: Optional[int] = None,
+):
+    """
+    Generates a standalone publication figure for:
+      Normalized Energy Consumption (% of Baseline) vs Target Load
+    """
+    baseline_exp = next((e for e in experiments if e.name == baseline_name), None)
+    if not baseline_exp:
+        print(f"Warning: Baseline '{baseline_name}' not found. Cannot plot normalized power.")
+        return
+
+    baseline_df = baseline_exp.to_df().set_index("target_rps")["cluster_watts"]
+
+    plt.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["DejaVu Sans", "Helvetica", "Arial"],
+        "axes.edgecolor": "#333333",
+        "axes.linewidth": 1.0,
+        "xtick.direction": "in",
+        "ytick.direction": "in",
+        "xtick.major.size": 4.5,
+        "ytick.major.size": 4.5,
+    })
+
+    fig, ax = plt.subplots(figsize=(6.8, 4.6), dpi=300)
+
+    for exp in experiments:
+        df = exp.to_df()
+        if df.empty:
+            continue
+
+        if max_plot_rps is not None:
+            df = df[df["target_rps"] <= max_plot_rps]
+
+        mapped_baseline = df["target_rps"].map(baseline_df)
+        df["plot_power"] = (df["cluster_watts"] / mapped_baseline) * 100
+
+        ax.plot(
             df["target_rps"],
             df["plot_power"],
             exp.line_style,
@@ -220,59 +308,95 @@ def plot_comparison(
             markersize=5.0,
             markevery=3,
         )
-        curr += 1
 
-        # 4. Throughput
-        axes[curr].plot(
-            df["target_rps"],
-            df["actual_throughput"],
-            exp.line_style,
-            color=exp.color,
-            label=exp.name,
-            linewidth=1.8,
-            markersize=5.0,
-            markevery=3,
-        )
+    ax.set_xlabel("Target Load (RPS)", fontsize=11, fontweight="bold")
+    y_label_power = f"Normalized Power (%)"
+    ax.set_ylabel(y_label_power, fontsize=11, fontweight="bold")
+    ax.set_title(f"Cluster Average Power Consumption (Normalized by {baseline_name})", fontsize=12, fontweight="bold")
+    ax.set_ylim(0, 105)
+    ax.yaxis.set_major_locator(ticker.MultipleLocator(20))
+    ax.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
+    ax.legend(fontsize=9.5, framealpha=0.92, loc="upper left")
 
-    # --- SET AXIS LABELS AND TITLES ONCE ---
-    idx = 0
-    if show_latency:
-        axes[idx].set_ylabel("P99 Latency (ms)", fontsize=11, fontweight="bold")
-        axes[idx].set_title("(a) System Latency (Lower is Better)", fontsize=12, fontweight="bold")
-        idx += 1
-
-    axes[idx].set_ylabel("Cluster Power (Watts)", fontsize=11, fontweight="bold")
-    axes[idx].set_title("(b) Energy Consumption", fontsize=12, fontweight="bold")
-    idx += 1
-
-    y_label_power = f"Norm. Power (% of {baseline_name})" if baseline_df is not None else "Cluster Power (Watts)"
-    axes[idx].set_ylabel(y_label_power, fontsize=11, fontweight="bold")
-    axes[idx].set_title("(c) Energy Consumption (Normalized)", fontsize=12, fontweight="bold")
-    axes[idx].set_ylim(0, 105)
-    axes[idx].yaxis.set_major_locator(ticker.MultipleLocator(20))
-    idx += 1
-
-    axes[idx].set_ylabel("Throughput (RPS)", fontsize=11, fontweight="bold")
-    axes[idx].set_title("(d) Throughput Capacity", fontsize=12, fontweight="bold")
-
-    axes[-1].set_xlabel("Target RPS", fontsize=11, fontweight="bold")
-
-    for ax in axes:
-        ax.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
-        ax.legend(fontsize=9.5, framealpha=0.92)
-
-    # Save output figures
-    output_pdf = output if output.endswith(".pdf") else f"{output}.pdf"
-    output_png = output_pdf.replace(".pdf", ".png")
-    
+    os.makedirs(os.path.dirname(os.path.abspath(output_pdf)), exist_ok=True)
     plt.tight_layout()
     plt.savefig(output_pdf, format="pdf", dpi=300, bbox_inches="tight")
     plt.savefig(output_png, format="png", dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"Success: {output_pdf} and {output_png} generated.")
+    print(f"\n[+] Normalized Power figure generated successfully:\n    - {output_pdf}\n    - {output_png}")
 
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Plot Hardware SIFT Experiment Results into separate publication figures."
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="paper",
+        help="Output directory to save generated PDF and PNG figures (default: paper)",
+    )
+    parser.add_argument(
+        "--latency-pdf",
+        type=str,
+        default=None,
+        help="Custom path for Latency PDF (default: <output-dir>/hardware_latency.pdf)",
+    )
+    parser.add_argument(
+        "--latency-png",
+        type=str,
+        default=None,
+        help="Custom path for Latency PNG (default: <output-dir>/hardware_latency.png)",
+    )
+    parser.add_argument(
+        "--power-pdf",
+        type=str,
+        default=None,
+        help="Custom path for Power PDF (default: <output-dir>/hardware_power.pdf)",
+    )
+    parser.add_argument(
+        "--power-png",
+        type=str,
+        default=None,
+        help="Custom path for Power PNG (default: <output-dir>/hardware_power.png)",
+    )
+    parser.add_argument(
+        "--normalized-pdf",
+        type=str,
+        default=None,
+        help="Custom path for Normalized Power PDF (default: <output-dir>/hardware_normalized.pdf)",
+    )
+    parser.add_argument(
+        "--normalized-png",
+        type=str,
+        default=None,
+        help="Custom path for Normalized Power PNG (default: <output-dir>/hardware_normalized.png)",
+    )
+    parser.add_argument(
+        "--baseline",
+        type=str,
+        default="Round Robin",
+        help="Baseline experiment name for normalization (default: 'Round Robin')",
+    )
+    parser.add_argument(
+        "--max-rps",
+        type=int,
+        default=None,
+        help="Optional maximum RPS to plot",
+    )
+
+    args = parser.parse_args()
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    latency_pdf = args.latency_pdf or os.path.join(args.output_dir, "hardware_latency.pdf")
+    latency_png = args.latency_png or os.path.join(args.output_dir, "hardware_latency.png")
+    power_pdf = args.power_pdf or os.path.join(args.output_dir, "hardware_power.pdf")
+    power_png = args.power_png or os.path.join(args.output_dir, "hardware_power.png")
+    normalized_pdf = args.normalized_pdf or os.path.join(args.output_dir, "hardware_normalized.pdf")
+    normalized_png = args.normalized_png or os.path.join(args.output_dir, "hardware_normalized.png")
+
     try:
         data = [
             parse_logs(
@@ -307,15 +431,32 @@ def main():
             ),
         ]
 
-        output_file = "paper/hardware.pdf"
-        os.makedirs(os.path.dirname(output_file), exist_ok=True)
-
-        # Passed 'Round Robin' implicitly as the default baseline_name
-        plot_comparison(
-            data,
-            output_file,
-            baseline_name="Round Robin",
+        # 1. Generate Latency Figure
+        plot_latency_metric(
+            experiments=data,
+            output_pdf=latency_pdf,
+            output_png=latency_png,
+            max_plot_rps=args.max_rps,
         )
+
+        # 2. Generate Power Figure
+        plot_power_metric(
+            experiments=data,
+            output_pdf=power_pdf,
+            output_png=power_png,
+            max_plot_rps=args.max_rps,
+        )
+
+        # 3. Generate Normalized Power Figure
+        if args.baseline:
+            plot_power_normalized_metric(
+                experiments=data,
+                baseline_name=args.baseline,
+                output_pdf=normalized_pdf,
+                output_png=normalized_png,
+                max_plot_rps=args.max_rps,
+            )
+
     except Exception as e:
         print(f"Pipeline Failed: {e}")
 

@@ -106,7 +106,7 @@ def plot_host(df, host_label, cpu_col, power_col, output_filename, y_limits=None
 
 
 def plot_final():
-    base_dir = "data/leastu"
+    base_dir = "paper/hardware_sift/leastu"
     
     print("Processing Energy Logs...")
     client_csv = os.path.join(base_dir, "client_sift_experiment.csv")
@@ -132,11 +132,11 @@ def plot_final():
 
     # Generate Image 1: Host 2
     plot_host(df, host_label="Host 2 (H2)", cpu_col="h2_cpu", power_col="h2_power", 
-              output_filename="h2_power_vs_load.png", y_limits=y_limits, x_limits=x_limits)
+              output_filename="h2_power_vs_load.pdf", y_limits=y_limits, x_limits=x_limits)
     
     # Generate Image 2: Host 3
     plot_host(df, host_label="Host 3 (H3)", cpu_col="h3_cpu", power_col="h3_power", 
-              output_filename="h3_power_vs_load.png", y_limits=y_limits, x_limits=x_limits)
+              output_filename="h3_power_vs_load.pdf", y_limits=y_limits, x_limits=x_limits)
 
 
 if __name__ == "__main__":

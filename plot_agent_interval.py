@@ -296,7 +296,7 @@ def plot_latency_metric(
 
     ax.set_xlabel("Target Load (RPS)", fontsize=11, fontweight="bold")
     ax.set_ylabel("P99 Latency (ms)", fontsize=11, fontweight="bold")
-    ax.set_title("(a) P99 Latency", fontsize=12, fontweight="bold")
+    ax.set_title("P99 Latency", fontsize=12, fontweight="bold")
     ax.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
     ax.legend(loc="upper left", fontsize=10, framealpha=0.92)
 
@@ -359,7 +359,7 @@ def plot_power_metric(
 
     ax.set_xlabel("Target Load (RPS)", fontsize=11, fontweight="bold")
     ax.set_ylabel("Cluster Power (Watts)", fontsize=11, fontweight="bold")
-    ax.set_title("(b) Cluster Average Power Consumption", fontsize=12, fontweight="bold")
+    ax.set_title("Cluster Average Power Consumption", fontsize=12, fontweight="bold")
     ax.grid(True, linestyle="--", linewidth=0.7, alpha=0.6)
     ax.legend(loc="upper left", fontsize=10, framealpha=0.92)
 
@@ -551,7 +551,7 @@ def plot_agent_overhead(
     ax2.set_ylim(0, 20.0)
     ax2.grid(False)
 
-    ax1.set_title("Server Agent Resource Overhead (< 0.4% CPU, ~11.6 MB RSS)", fontsize=12, fontweight="bold", pad=12)
+    ax1.set_title("Server Agent Resource Overhead", fontsize=12, fontweight="bold", pad=12)
 
     # Combined single legend box
     if handles:

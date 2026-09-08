@@ -282,6 +282,8 @@ def plot_dual_axis_scalability(
     ax1.grid(True, linestyle="--", linewidth=0.7, alpha=0.5, color="#888888")
     ax2.grid(False)
 
+    ax1.set_title("Controller Resource Utilization", fontsize=12, fontweight="bold", pad=12)
+
     # Combined single-box legend
     handles = [line1, line2]
     labels = [h.get_label() for h in handles]
@@ -351,7 +353,7 @@ def main():
     parser.add_argument(
         "--log-dir",
         type=str,
-        default="logs",
+        default="paper/scalability",
         help="Directory containing the controller_scale_M*.log files (default: logs/)"
     )
     parser.add_argument(
